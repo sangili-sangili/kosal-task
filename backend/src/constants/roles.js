@@ -1,0 +1,20 @@
+const ROLES = Object.freeze({
+  SUPER_ADMIN: 'SUPER_ADMIN',
+  ADMIN: 'ADMIN',
+  MANAGER: 'MANAGER',
+  STAFF: 'STAFF',
+  CUSTOMER: 'CUSTOMER',
+});
+
+const ROLE_HIERARCHY = Object.freeze({
+  [ROLES.SUPER_ADMIN]: 100,
+  [ROLES.ADMIN]: 80,
+  [ROLES.MANAGER]: 60,
+  [ROLES.STAFF]: 40,
+  [ROLES.CUSTOMER]: 20,
+});
+
+module.exports = {
+  ROLES,
+  ROLE_HIERARCHY,
+};

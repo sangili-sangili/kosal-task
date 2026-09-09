@@ -1,0 +1,108 @@
+name: Enterprise Full-Stack CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # Stage 1: Quality Checks & Unit/Integration Tests
+  quality-and-test:
+    name: Lint, Test & Validate
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root_password
+          MYSQL_DATABASE: enterprise_db
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+      redis:
+        image: redis:7.0-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Monorepo Root Dependencies
+        run: npm ci || npm install
+
+      # Backend Pipeline Steps
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci || npm install
+
+      - name: Run Backend Unit & Integration Tests
+        working-directory: ./backend
+        env:
+          NODE_ENV: test
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_NAME: enterprise_db
+          DB_USER: root
+          DB_PASSWORD: root_password
+          USE_SQLITE_FALLBACK: "true"
+          JWT_ACCESS_SECRET: test_jwt_access_secret_production_key_32bytes_minimum!
+          JWT_REFRESH_SECRET: test_jwt_refresh_secret_production_key_32bytes_minimum!
+          REDIS_ENABLED: "false"
+        run: npm test
+
+      # Frontend Pipeline Steps
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci || npm install
+
+      - name: Build Frontend Application Bundle
+        working-directory: ./frontend
+        run: npm run build
+
+  # Stage 2: Container Image Build Validation
+  docker-build:
+    name: Build & Verify Docker Images
+    needs: quality-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Backend Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: false
+          tags: enterprise-backend:ci-latest
+
+      - name: Build Frontend Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: false
+          tags: enterprise-frontend:ci-latest
+
+  # Stage 3: Deployment (Production / Staging)
+  deploy:
+    name: Deploy to Production
+    needs: docker-build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Deploy Notification
+        run: |
+          echo "Production deployment initiated for commit ${{ github.sha }}."
+          echo "Container images ready for registry push and cluster deployment."
