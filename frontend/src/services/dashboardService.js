@@ -6,7 +6,18 @@ export const dashboardService = {
    * @returns {Promise<Object>}
    */
   getMetrics: async () => {
-    return api.get('/dashboard/metrics');
+    const res = await api.get('/dashboard/metrics');
+    if (
+      res &&
+      typeof res === 'object' &&
+      'data' in res &&
+      res.data &&
+      typeof res.data === 'object' &&
+      ('leads' in res.data || 'inventory' in res.data)
+    ) {
+      return res.data;
+    }
+    return res;
   },
 
   /**

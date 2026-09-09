@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+  import React, { useState } from 'react';
 import { useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   Menu,
@@ -76,9 +76,9 @@ export function Header({ onToggleSidebar }) {
   );
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-slate-200 bg-white/95 backdrop-blur-md px-4 sm:px-6">
+    <header className="sticky top-0 z-30 flex h-18 sm:h-20 w-full items-center justify-between border-b border-slate-200/80 bg-white/95 backdrop-blur-md px-6 sm:px-8 shadow-xs">
       {/* Left: Mobile Toggle & Page Title/Breadcrumbs */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3.5">
         <button
           type="button"
           onClick={onToggleSidebar}
@@ -88,37 +88,18 @@ export function Header({ onToggleSidebar }) {
           <Menu className="w-5 h-5" />
         </button>
 
-        <div className="flex flex-col">
-          <div className="text-[11px] font-medium text-slate-400 hidden sm:block">
+        <div className="flex flex-col justify-center py-1">
+          <div className="text-[11px] font-semibold text-slate-400 hidden sm:block tracking-wide uppercase">
             {currentMeta.breadcrumb}
           </div>
-          <h1 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight leading-none sm:mt-0.5">
+          <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-none sm:mt-1">
             {currentMeta.title}
           </h1>
         </div>
       </div>
 
-      {/* Center: Global Search Input */}
-      <div className="hidden md:flex items-center max-w-xs w-full mx-4">
-        <div className="relative w-full">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-            <Search className="h-3.5 w-3.5" />
-          </div>
-          <input
-            type="text"
-            placeholder="Search leads, units, buyers... (Press /)"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && e.target.value.trim()) {
-                navigate(`/leads?search=${encodeURIComponent(e.target.value.trim())}`);
-              }
-            }}
-            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50/60 focus:bg-white focus:border-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-800 transition-colors"
-          />
-        </div>
-      </div>
-
       {/* Right: Notifications & User Profile */}
-      <div className="flex items-center gap-2 sm:gap-3">
+      <div className="flex items-center gap-3">
         {/* Notifications Popover */}
         <div className="relative">
           <button

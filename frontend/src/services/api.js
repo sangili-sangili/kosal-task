@@ -23,7 +23,12 @@ api.interceptors.request.use(
 
 // Response Interceptor: Extract data & handle 401 Unauthorized
 api.interceptors.response.use(
-  (response) => response.data,
+  (response) => {
+    if (response.data && typeof response.data === 'object' && 'data' in response.data) {
+      return response.data.data;
+    }
+    return response.data;
+  },
   async (error) => {
     // 401 Unauthorized handling (token expired, invalid, or missing)
     if (
