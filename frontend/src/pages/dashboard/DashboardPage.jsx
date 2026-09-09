@@ -27,6 +27,7 @@ import {
 import { useCrm } from '../../context/CrmContext';
 import { useAuth } from '../../hooks/useAuth';
 import { dashboardService } from '../../services/dashboardService';
+import { auditService } from '../../services/auditService';
 import { LEAD_STAGES, STAGE_CONFIG } from '../../mock/mockData';
 import { formatINR, formatINRCompact, formatCRMDate } from '../../utils/crmFormatters';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
@@ -34,13 +35,53 @@ import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import Table from '../../components/ui/Table';
 
+// Dynamic Activity Stream formatting helpers
+const formatActivityTime = (ts) => {
+  if (!ts) return 'Just now';
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return 'Just now';
+    const now = new Date();
+    const diffSec = Math.floor((now - d) / 1000);
+    if (diffSec < 60) return 'Just now';
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  } catch (e) {
+    return 'Just now';
+  }
+};
+
+const getActionBadgeClass = (action) => {
+  switch (action) {
+    case 'CREATE':
+    case 'APPROVE':
+      return 'text-emerald-700 bg-emerald-50 border-emerald-200';
+    case 'UPDATE':
+      return 'text-blue-700 bg-blue-50 border-blue-200';
+    case 'DELETE':
+      return 'text-rose-700 bg-rose-50 border-rose-200';
+    case 'STAGE_CHANGE':
+      return 'text-purple-700 bg-purple-50 border-purple-200';
+    case 'SECURITY':
+      return 'text-indigo-700 bg-indigo-50 border-indigo-200';
+    case 'BLOCK':
+      return 'text-amber-700 bg-amber-50 border-amber-200';
+    default:
+      return 'text-slate-700 bg-slate-100 border-slate-200';
+  }
+};
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { currentUser, auditLogs = [] } = useCrm();
+  const { currentUser } = useCrm();
   const activeUser = user || currentUser;
 
   const [metrics, setMetrics] = useState(null);
+  const [liveActivities, setLiveActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -53,21 +94,44 @@ export function DashboardPage() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Fetch Live Metrics from Backend API with defensive unwrapping
+  // Fetch Live Metrics & Activities from Backend API with defensive unwrapping
   const fetchMetrics = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await dashboardService.getMetrics();
-      let data = res;
-      if (res && typeof res === 'object') {
-        if (res.data && typeof res.data === 'object' && ('leads' in res.data || 'inventory' in res.data)) {
-          data = res.data;
-        } else if (res.leads || res.inventory) {
-          data = res;
+      const [res, auditRes] = await Promise.allSettled([
+        dashboardService.getMetrics(),
+        auditService.getAuditLogs({ limit: 6 }),
+      ]);
+
+      let metricsData = null;
+      if (res.status === 'fulfilled') {
+        const val = res.value;
+        let data = val;
+        if (val && typeof val === 'object') {
+          if (val.data && typeof val.data === 'object' && ('leads' in val.data || 'inventory' in val.data)) {
+            data = val.data;
+          } else if (val.leads || val.inventory) {
+            data = val;
+          }
+        }
+        metricsData = data;
+        setMetrics(data);
+      } else {
+        console.error('Failed to load dashboard metrics', res.reason);
+        setError(res.reason?.message || 'Unable to connect to live backend API');
+      }
+
+      // Populate Live Activity Stream from live backend audit logs
+      if (metricsData?.recentActivities && Array.isArray(metricsData.recentActivities) && metricsData.recentActivities.length > 0) {
+        setLiveActivities(metricsData.recentActivities);
+      } else if (auditRes.status === 'fulfilled') {
+        const aVal = auditRes.value;
+        const logs = aVal?.logs || aVal?.data || [];
+        if (Array.isArray(logs) && logs.length > 0) {
+          setLiveActivities(logs);
         }
       }
-      setMetrics(data);
     } catch (err) {
       console.error('Failed to load dashboard metrics', err);
       setError(err?.message || 'Unable to connect to live backend API');
@@ -860,29 +924,63 @@ export function DashboardPage() {
 
           <div className="divide-y divide-slate-100 flex-1 flex flex-col justify-between">
             <div className="divide-y divide-slate-100">
-              {auditLogs.slice(0, 4).map((log) => (
-                <div key={log.id} className="p-3.5 hover:bg-slate-50/80 transition-colors flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
-                    {log.actor?.avatar || 'SYS'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1 text-xs">
-                      <span className="font-bold text-slate-900 truncate">{log.actor?.name || 'CRM System'}</span>
-                      <span className="text-[10px] text-slate-400 font-mono font-semibold shrink-0">
-                        {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
+              {loading && liveActivities.length === 0 ? (
+                <div className="p-4 space-y-3">
+                  {[1, 2, 3, 4].map((n) => (
+                    <div key={n} className="flex items-start gap-3 p-1.5 animate-pulse">
+                      <div className="w-8 h-8 rounded-xl bg-slate-200 shrink-0" />
+                      <div className="flex-1 space-y-2">
+                        <div className="flex justify-between">
+                          <div className="h-3 bg-slate-200 rounded w-24" />
+                          <div className="h-2.5 bg-slate-100 rounded w-12" />
+                        </div>
+                        <div className="h-3 bg-slate-100 rounded w-5/6" />
+                        <div className="h-2 bg-slate-100 rounded w-1/3" />
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-600 line-clamp-2 mt-0.5 leading-relaxed font-medium">
-                      {log.summary}
-                    </p>
-                    <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-400">
-                      <span className="font-bold text-brand-600">{log.action}</span>
-                      <span>•</span>
-                      <span className="truncate font-medium">{log.entityTitle}</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              ) : liveActivities.length === 0 ? (
+                <div className="p-8 text-center text-slate-400">
+                  <Clock className="w-8 h-8 mx-auto mb-2 text-slate-300 opacity-60" />
+                  <p className="text-xs font-semibold text-slate-600">No Recent Activity Records</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">System events and audit logs will appear here live</p>
+                </div>
+              ) : (
+                liveActivities.slice(0, 4).map((log) => {
+                  const actorName = log.actor?.name || 'CRM System';
+                  const initials = log.actor?.avatar ||
+                    actorName.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase() ||
+                    'SYS';
+                  const logDate = log.timestamp || log.createdAt;
+
+                  return (
+                    <div key={log.id} className="p-3.5 hover:bg-slate-50/80 transition-colors flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
+                        {initials}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1 text-xs">
+                          <span className="font-bold text-slate-900 truncate">{actorName}</span>
+                          <span className="text-[10px] text-slate-400 font-mono font-semibold shrink-0">
+                            {formatActivityTime(logDate)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 line-clamp-2 mt-0.5 leading-relaxed font-medium">
+                          {log.summary}
+                        </p>
+                        <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-400">
+                          <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] border ${getActionBadgeClass(log.action)}`}>
+                            {log.action}
+                          </span>
+                          <span>•</span>
+                          <span className="truncate font-medium text-slate-500">{log.entityTitle || log.entityType}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
 
             <div className="p-3 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl text-center">

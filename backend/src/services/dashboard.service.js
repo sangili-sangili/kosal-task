@@ -4,6 +4,7 @@ const { LEAD_STAGES } = require('../constants/leadStages');
 const { UNIT_STATUS } = require('../constants/unitStatus');
 const { BOOKING_STATUS } = require('../constants/bookingStatus');
 const { FOLLOWUP_STATUS } = require('../models/LeadFollowup');
+const auditService = require('./audit.service');
 
 class DashboardService {
   /**
@@ -227,6 +228,15 @@ class DashboardService {
       status: b.status,
     }));
 
+    // 9. Live Recent Activity Stream (Latest 5 records from MySQL audit_logs)
+    let recentActivities = [];
+    try {
+      const auditResult = await auditService.getAuditLogs({ limit: 5 });
+      recentActivities = auditResult.logs || [];
+    } catch (err) {
+      recentActivities = [];
+    }
+
     return {
       leads: {
         total: totalLeads,
@@ -252,6 +262,7 @@ class DashboardService {
       projectPerformance,
       monthlyTrends,
       recentBookings: formattedRecentBookings,
+      recentActivities,
     };
   }
 }
