@@ -15,6 +15,8 @@ const rateLimitMiddleware = require('./middlewares/rateLimit.middleware');
 const healthRoutes = require('./routes/health.routes');
 const authRoutes = require('./routes/auth.routes');
 const leadRoutes = require('./routes/lead.routes');
+const projectRoutes = require('./routes/project.routes');
+const unitRoutes = require('./routes/unit.routes');
 
 const app = express();
 
@@ -59,6 +61,8 @@ app.use('/api/', rateLimitMiddleware);
 app.use('/api/v1', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/leads', leadRoutes);
+app.use('/api/v1/projects', projectRoutes);
+app.use('/api/v1/units', unitRoutes);
 
 // Root fallback
 app.get('/', (req, res) => {
