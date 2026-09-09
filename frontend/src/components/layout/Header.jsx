@@ -8,6 +8,8 @@ import {
   LogOut,
   AlertCircle,
   CheckCircle2,
+  Check,
+  CheckCheck,
   X,
   RefreshCw,
   UserCircle2,
@@ -55,6 +57,40 @@ export function Header({ onToggleSidebar }) {
   const [notifLoading, setNotifLoading] = useState(false);
   const [notifFetched, setNotifFetched] = useState(false);
 
+  // Persistent read notification tracking
+  const [readNotifIds, setReadNotifIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem('crm_read_notifications');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('crm_read_notifications', JSON.stringify(readNotifIds));
+    } catch (e) {}
+  }, [readNotifIds]);
+
+  const isNotificationRead = useCallback(
+    (id) => readNotifIds.includes(String(id)),
+    [readNotifIds]
+  );
+
+  const markNotificationAsRead = useCallback((id) => {
+    const strId = String(id);
+    setReadNotifIds((prev) => (prev.includes(strId) ? prev : [...prev, strId]));
+  }, []);
+
+  const markAllAsRead = useCallback(() => {
+    const allIds = [
+      ...followUps.map((l) => String(l.id)),
+      ...newLeads.map((l) => `new-${l.id}`),
+    ];
+    setReadNotifIds((prev) => Array.from(new Set([...prev, ...allIds])));
+  }, [followUps, newLeads]);
+
   // Refs for click/touch outside detection
   const notifRef = useRef(null);
   const profileRef = useRef(null);
@@ -63,7 +99,15 @@ export function Header({ onToggleSidebar }) {
   useEffect(() => {
     setNotificationsOpen(false);
     setProfileOpen(false);
-  }, [location.pathname]);
+
+    // Auto-mark notifications as read when viewing that lead's profile
+    const parts = location.pathname.split('/');
+    if (parts[1] === 'leads' && parts[2] && parts[2] !== 'new' && parts[2] !== 'create') {
+      const leadId = parts[2];
+      markNotificationAsRead(leadId);
+      markNotificationAsRead(`new-${leadId}`);
+    }
+  }, [location.pathname, markNotificationAsRead]);
 
   // ── Click / Touch / Keydown outside closes both dropdowns ─────────────────
   useEffect(() => {
@@ -166,7 +210,9 @@ export function Header({ onToggleSidebar }) {
     }
   }
 
-  const badgeCount = followUps.length;
+  const unreadFollowUps = followUps.filter((l) => !isNotificationRead(l.id));
+  const unreadNewLeads = newLeads.filter((l) => !isNotificationRead(`new-${l.id}`));
+  const badgeCount = unreadFollowUps.length + unreadNewLeads.length;
 
   return (
     <header className="sticky top-0 z-30 flex h-16 sm:h-[72px] w-full items-center justify-between border-b border-slate-200/80 bg-white/95 backdrop-blur-md px-4 sm:px-6 lg:px-8 shadow-xs gap-3">
@@ -207,9 +253,13 @@ export function Header({ onToggleSidebar }) {
             aria-label="Notifications"
           >
             <Bell className="w-[18px] h-[18px]" />
-            {badgeCount > 0 && (
-              <span className="absolute top-1 right-1 min-w-[16px] h-4 px-0.5 rounded-full bg-rose-500 ring-2 ring-white flex items-center justify-center text-[9px] font-bold text-white leading-none">
+            {badgeCount > 0 ? (
+              <span className="absolute top-1 right-1 min-w-[16px] h-4 px-0.5 rounded-full bg-rose-500 ring-2 ring-white flex items-center justify-center text-[9px] font-bold text-white leading-none shadow-xs">
                 {badgeCount > 9 ? '9+' : badgeCount}
+              </span>
+            ) : (
+              <span className="absolute top-1 right-1 min-w-[16px] h-4 px-0.5 rounded-full bg-slate-200 text-slate-600 ring-2 ring-white flex items-center justify-center text-[9px] font-bold leading-none">
+                0
               </span>
             )}
           </button>
@@ -237,13 +287,36 @@ export function Header({ onToggleSidebar }) {
                       <Bell className="w-3.5 h-3.5 text-rose-600" />
                     </div>
                     <span className="text-xs font-bold text-slate-900 truncate">Follow-up Alerts</span>
-                    {badgeCount > 0 && (
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200 shrink-0">
-                        {badgeCount} Pending
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${
+                        badgeCount > 0
+                          ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                          : 'bg-slate-100 text-slate-600 border border-slate-200'
+                      }`}
+                    >
+                      {badgeCount} Pending
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {badgeCount > 0 ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          markAllAsRead();
+                        }}
+                        className="text-[11px] font-semibold text-brand-600 hover:text-brand-800 hover:underline flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-brand-50 transition-colors"
+                        title="Mark all notifications as read"
+                      >
+                        <CheckCheck className="w-3.5 h-3.5" />
+                        <span>Mark read</span>
+                      </button>
+                    ) : (
+                      <span className="text-[11px] font-medium text-emerald-600 flex items-center gap-1 px-1">
+                        <Check className="w-3 h-3" />
+                        <span>All read</span>
                       </span>
                     )}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); fetchFollowUps(); }}
@@ -252,13 +325,6 @@ export function Header({ onToggleSidebar }) {
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${notifLoading ? 'animate-spin' : ''}`} />
                     </button>
-                    <Link
-                      to="/leads"
-                      onClick={() => setNotificationsOpen(false)}
-                      className="text-[11px] font-semibold text-brand-600 hover:underline whitespace-nowrap px-1"
-                    >
-                      All Leads
-                    </Link>
                     {/* Universal close button */}
                     <button
                       type="button"
@@ -304,62 +370,104 @@ export function Header({ onToggleSidebar }) {
                         today.setHours(0, 0, 0, 0);
                         const isOverdue = leadDate && leadDate < today;
                         const isToday = leadDate && leadDate.toDateString() === new Date().toDateString();
+                        const isRead = isNotificationRead(lead.id);
 
                         return (
-                          <button
+                          <div
                             key={`followup-${lead.id}`}
-                            type="button"
-                            onClick={() => {
-                              setNotificationsOpen(false);
-                              navigate(`/leads/${lead.id}`);
-                            }}
-                            className="w-full p-3.5 hover:bg-slate-50 transition-colors text-left"
+                            className={`w-full p-3.5 hover:bg-slate-50 transition-colors text-left flex items-start justify-between gap-2 border-b border-slate-100 ${
+                              isRead ? 'opacity-60 bg-slate-50/50' : 'bg-white'
+                            }`}
                           >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="w-7 h-7 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-[10px] font-bold shrink-0 border border-brand-200">
-                                  {(lead.name || 'L').charAt(0).toUpperCase()}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                markNotificationAsRead(lead.id);
+                                setNotificationsOpen(false);
+                                navigate(`/leads/${lead.id}`);
+                              }}
+                              className="flex-1 min-w-0 text-left"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <div
+                                    className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 border ${
+                                      isRead
+                                        ? 'bg-slate-100 text-slate-500 border-slate-200'
+                                        : 'bg-brand-100 text-brand-700 border-brand-200'
+                                    }`}
+                                  >
+                                    {(lead.name || 'L').charAt(0).toUpperCase()}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <span
+                                        className={`text-xs truncate block ${
+                                          isRead ? 'font-medium text-slate-600' : 'font-bold text-slate-900'
+                                        }`}
+                                      >
+                                        {lead.name}
+                                      </span>
+                                      {!isRead && (
+                                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" title="Unread" />
+                                      )}
+                                    </div>
+                                    <span className="text-[10px] text-slate-400 truncate block">
+                                      {lead.phone || lead.email || 'Lead'}
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="min-w-0">
-                                  <span className="text-xs font-semibold text-slate-900 truncate block">{lead.name}</span>
-                                  <span className="text-[10px] text-slate-400 truncate block">{lead.phone || lead.email || 'Lead'}</span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {isOverdue && (
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-700 border border-rose-200 flex items-center gap-0.5">
+                                      <AlertCircle className="w-2.5 h-2.5" />
+                                      Overdue
+                                    </span>
+                                  )}
+                                  {isToday && (
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                      Today
+                                    </span>
+                                  )}
+                                  {!isOverdue && !isToday && leadDate && (
+                                    <span className="text-[9px] font-mono text-slate-400">
+                                      {leadDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-1 shrink-0">
-                                {isOverdue && (
-                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-700 border border-rose-200 flex items-center gap-0.5">
-                                    <AlertCircle className="w-2.5 h-2.5" />
-                                    Overdue
-                                  </span>
-                                )}
-                                {isToday && (
-                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                                    Today
-                                  </span>
-                                )}
-                                {!isOverdue && !isToday && leadDate && (
-                                  <span className="text-[9px] font-mono text-slate-400">
-                                    {leadDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
 
-                            <p className="text-[11px] text-slate-600 mt-1 truncate pl-9">
-                              {lead.followupNote || lead.notes?.[0]?.content || `Follow up on prospect`}
-                            </p>
+                              <p className="text-[11px] text-slate-600 mt-1 truncate pl-9">
+                                {lead.followupNote || lead.notes?.[0]?.content || `Follow up on prospect`}
+                              </p>
 
-                            <div className="mt-1.5 pl-9 flex items-center gap-2 flex-wrap">
-                              <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${STAGE_COLORS[lead.stage] || 'bg-slate-100 text-slate-600'}`}>
-                                {lead.stage}
-                              </span>
-                              {(lead.assignedSalesEmployee?.name || lead.assignedTo?.name || lead.assignedToName) && (
-                                <span className="text-[10px] text-slate-400 truncate">
-                                  → {lead.assignedSalesEmployee?.name || lead.assignedTo?.name || lead.assignedToName}
+                              <div className="mt-1.5 pl-9 flex items-center gap-2 flex-wrap">
+                                <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${STAGE_COLORS[lead.stage] || 'bg-slate-100 text-slate-600'}`}>
+                                  {lead.stage}
                                 </span>
-                              )}
-                            </div>
-                          </button>
+                                {(lead.assignedSalesEmployee?.name || lead.assignedTo?.name || lead.assignedToName) && (
+                                  <span className="text-[10px] text-slate-400 truncate">
+                                    → {lead.assignedSalesEmployee?.name || lead.assignedTo?.name || lead.assignedToName}
+                                  </span>
+                                )}
+                              </div>
+                            </button>
+
+                            {/* Individual Mark as Read Checkmark */}
+                            {!isRead && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  markNotificationAsRead(lead.id);
+                                }}
+                                className="p-1 rounded-md text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors shrink-0 mt-0.5"
+                                title="Mark as read"
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         );
                       })}
 
@@ -369,32 +477,59 @@ export function Header({ onToggleSidebar }) {
                           <div className="px-3.5 py-2 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                             New Prospects Requiring Outreach ({newLeads.length})
                           </div>
-                          {newLeads.slice(0, 5).map((lead) => (
-                            <button
-                              key={`new-${lead.id}`}
-                              type="button"
-                              onClick={() => {
-                                setNotificationsOpen(false);
-                                navigate(`/leads/${lead.id}`);
-                              }}
-                              className="w-full p-3 hover:bg-slate-50 transition-colors text-left"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                  <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold shrink-0">
-                                    {(lead.name || 'L').charAt(0).toUpperCase()}
+                          {newLeads.slice(0, 5).map((lead) => {
+                            const isRead = isNotificationRead(`new-${lead.id}`);
+                            return (
+                              <div
+                                key={`new-${lead.id}`}
+                                className={`w-full p-3 hover:bg-slate-50 transition-colors text-left flex items-center justify-between gap-2 border-b border-slate-100 ${
+                                  isRead ? 'opacity-60 bg-slate-50/50' : 'bg-white'
+                                }`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    markNotificationAsRead(`new-${lead.id}`);
+                                    setNotificationsOpen(false);
+                                    navigate(`/leads/${lead.id}`);
+                                  }}
+                                  className="flex-1 min-w-0 text-left"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                                        isRead ? 'bg-slate-100 text-slate-500' : 'bg-blue-100 text-blue-700'
+                                      }`}>
+                                        {(lead.name || 'L').charAt(0).toUpperCase()}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <p className={`text-xs truncate ${isRead ? 'font-medium text-slate-600' : 'font-bold text-slate-900'}`}>
+                                          {lead.name}
+                                        </p>
+                                        <p className="text-[10px] text-slate-400 truncate">{lead.phone || lead.email}</p>
+                                      </div>
+                                    </div>
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                      New Lead
+                                    </span>
                                   </div>
-                                  <div className="min-w-0">
-                                    <p className="text-xs font-semibold text-slate-900 truncate">{lead.name}</p>
-                                    <p className="text-[10px] text-slate-400 truncate">{lead.phone || lead.email}</p>
-                                  </div>
-                                </div>
-                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                                  New Lead
-                                </span>
+                                </button>
+                                {!isRead && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      markNotificationAsRead(`new-${lead.id}`);
+                                    }}
+                                    className="p-1 rounded-md text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors shrink-0"
+                                    title="Mark as read"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                               </div>
-                            </button>
-                          ))}
+                            );
+                          })}
                         </>
                       )}
                     </>
@@ -403,13 +538,28 @@ export function Header({ onToggleSidebar }) {
 
                 {/* Notif Footer */}
                 {followUps.length > 0 && (
-                  <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50/60 shrink-0">
+                  <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50/60 shrink-0 flex items-center justify-between text-[11px]">
+                    {badgeCount > 0 ? (
+                      <button
+                        type="button"
+                        onClick={markAllAsRead}
+                        className="font-semibold text-brand-600 hover:text-brand-800 hover:underline flex items-center gap-1"
+                      >
+                        <CheckCheck className="w-3.5 h-3.5" />
+                        Mark all as read
+                      </button>
+                    ) : (
+                      <span className="text-slate-500 font-medium flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        All alerts marked as read (0 unread)
+                      </span>
+                    )}
                     <Link
                       to="/leads"
                       onClick={() => setNotificationsOpen(false)}
-                      className="block text-center text-[11px] font-semibold text-brand-600 hover:underline"
+                      className="font-semibold text-slate-600 hover:text-brand-600 hover:underline"
                     >
-                      View all {followUps.length} pending follow-ups →
+                      View all {followUps.length} leads →
                     </Link>
                   </div>
                 )}
