@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -20,8 +20,8 @@ import {
   Home,
   Check,
 } from 'lucide-react';
-import { useCrm } from '../../context/CrmContext';
-import { LEAD_STAGES, STAGE_CONFIG } from '../../mock/mockData';
+import { leadService } from '../../services/leadService';
+import { LEAD_STAGES, STAGE_CONFIG } from '../../constants/crmConstants';
 import Input from '../ui/Input';
 import Select from '../ui/Select';
 import Textarea from '../ui/Textarea';
@@ -31,13 +31,38 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 
 export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
   const navigate = useNavigate();
-  const { employees, projects } = useCrm();
+
+  const [employees, setEmployees] = useState([]);
+  const [projects, setProjects] = useState([]);
 
   const defaultFollowupDate = () => {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     return d.toISOString().split('T')[0];
   };
+
+  // Load active sales reps & projects from DB
+  useEffect(() => {
+    let isMounted = true;
+    const loadData = async () => {
+      try {
+        const [usersData, projectsData] = await Promise.all([
+          leadService.getUsers().catch(() => []),
+          leadService.getProjects().catch(() => []),
+        ]);
+        if (isMounted) {
+          setEmployees(Array.isArray(usersData) ? usersData : []);
+          setProjects(Array.isArray(projectsData) ? projectsData : []);
+        }
+      } catch (err) {
+        console.error('Failed to load users/projects for LeadForm:', err);
+      }
+    };
+    loadData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const {
     register,
@@ -46,56 +71,55 @@ export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
     watch,
     formState: { errors, isSubmitting },
   } = useForm({
-    defaultValues: initialData || {
-      name: '',
-      email: '',
-      phone: '',
-      city: 'Bangalore',
-      stage: LEAD_STAGES.NEW,
-      assignedToId: employees[0]?.id || '',
-      preferredProject: projects[0]?.name || 'Prestige Falcon City',
-      unitType: '3 BHK Grand',
-      budget: '₹1.0 Cr - ₹1.5 Cr',
-      source: 'Website',
-      followupDate: defaultFollowupDate(),
-      followupTime: '11:30 AM',
-      priority: 'HIGH',
-      notes: '',
-    },
+    defaultValues: initialData
+      ? {
+          name: initialData.name || '',
+          email: initialData.email || '',
+          phone: initialData.phone || '',
+          source: initialData.source || 'Website',
+          stage: initialData.stage || LEAD_STAGES.NEW,
+          assigned_to: initialData.assigned_to || initialData.assignedSalesEmployee?.id || '',
+          follow_up_date: initialData.follow_up_date || initialData.followupDate || defaultFollowupDate(),
+          notes: '',
+        }
+      : {
+          name: '',
+          email: '',
+          phone: '',
+          source: 'Website',
+          stage: LEAD_STAGES.NEW,
+          assigned_to: '',
+          follow_up_date: defaultFollowupDate(),
+          notes: '',
+        },
   });
 
-  // Watched values for dynamic preview
+  // Watched values for live preview
   const watchedName = watch('name');
   const watchedEmail = watch('email');
   const watchedPhone = watch('phone');
-  const watchedProject = watch('preferredProject');
-  const watchedBudget = watch('budget');
+  const watchedSource = watch('source');
   const watchedStage = watch('stage');
-  const watchedAssignedId = watch('assignedToId');
-  const watchedPriority = watch('priority');
-  const watchedUnitType = watch('unitType');
+  const watchedAssignedId = watch('assigned_to');
+  const watchedFollowupDate = watch('follow_up_date');
 
-  const assignedRep = employees.find((e) => e.id === watchedAssignedId) || employees[0];
-  const selectedProj = projects.find((p) => p.name === watchedProject) || projects[0];
+  const assignedRep =
+    employees.find((e) => String(e.id) === String(watchedAssignedId)) || employees[0];
 
-  // Quick fill sample data for fast testing/evaluation
+  // Quick fill demo data for testing
   const handleQuickFill = () => {
     setValue('name', 'Vikramaditya Singhania', { shouldValidate: true });
     setValue('email', 'vikram.singhania@apexcapital.in', { shouldValidate: true });
-    setValue('phone', '+91 98450 88291', { shouldValidate: true });
-    setValue('city', 'Bangalore (Indiranagar)');
-    setValue('source', 'MagicBricks');
-    setValue('preferredProject', projects[0]?.name || 'Prestige Falcon City');
-    setValue('unitType', '3 BHK Grand');
-    setValue('budget', '₹1.5 Cr - ₹2.5 Cr');
+    setValue('phone', '+919845088291', { shouldValidate: true });
+    setValue('source', 'Website');
     setValue('stage', LEAD_STAGES.NEW);
-    setValue('assignedToId', employees[0]?.id || '');
-    setValue('followupDate', defaultFollowupDate());
-    setValue('followupTime', '03:00 PM');
-    setValue('priority', 'HIGH');
+    if (employees.length > 0) {
+      setValue('assigned_to', String(employees[0].id));
+    }
+    setValue('follow_up_date', defaultFollowupDate());
     setValue(
       'notes',
-      'HNI client looking for high floor east-facing 3 BHK. Prefers Tower A with clubhouse view. Pre-approved HDFC loan ready.'
+      'HNI client looking for 3 BHK luxury residence. Pre-approved HDFC loan ready.'
     );
   };
 
@@ -115,8 +139,8 @@ export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
                 <Sparkles className="w-4 h-4" />
               </div>
               <div>
-                <p className="text-xs font-semibold text-slate-800">Quick-Fill Enterprise Demo</p>
-                <p className="text-[11px] text-slate-500">Prefill verified HNI prospect data with one click</p>
+                <p className="text-xs font-semibold text-slate-800">Quick-Fill Sample Prospect</p>
+                <p className="text-[11px] text-slate-500">Prefill verified prospect data with one click</p>
               </div>
             </div>
             <Button
@@ -143,7 +167,7 @@ export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
                   Contact Information
                 </span>
               </div>
-              <span className="text-[11px] font-medium text-slate-400">Primary Contact Details</span>
+              <span className="text-[11px] font-medium text-slate-400">Primary Details</span>
             </div>
 
             <CardContent className="p-5 space-y-4">
@@ -163,58 +187,45 @@ export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
                 <Input
                   label="Contact Phone Number"
                   type="tel"
-                  placeholder="+91 98450 12891"
+                  placeholder="+919845012891"
                   required
                   leftIcon={Phone}
                   error={errors.phone?.message}
                   {...register('phone', {
                     required: 'Valid phone number is required',
                     pattern: {
-                      value: /^[+]?[0-9\s-]{10,15}$/,
-                      message: 'Enter a valid 10-digit phone number',
+                      value: /^[+]?[0-9\s-]{5,25}$/,
+                      message: 'Enter a valid phone number (at least 5 digits)',
                     },
                   })}
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="sm:col-span-2">
-                  <Input
-                    label="Official Email Address"
-                    type="email"
-                    placeholder="vikram.s@apexcapital.in"
-                    required
-                    leftIcon={Mail}
-                    error={errors.email?.message}
-                    {...register('email', {
-                      required: 'Email address is required',
-                      pattern: {
-                        value: /^\S+@\S+\.\S+$/,
-                        message: 'Enter a valid email address format',
-                      },
-                    })}
-                  />
-                </div>
-
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Input
-                  label="Current City / Location"
-                  placeholder="e.g. Bangalore"
-                  leftIcon={MapPin}
-                  {...register('city')}
+                  label="Official Email Address"
+                  type="email"
+                  placeholder="vikram.s@apexcapital.in"
+                  leftIcon={Mail}
+                  error={errors.email?.message}
+                  {...register('email', {
+                    pattern: {
+                      value: /^\S+@\S+\.\S+$/,
+                      message: 'Enter a valid email address format',
+                    },
+                  })}
                 />
-              </div>
 
-              <div>
                 <Select
                   label="Lead Acquisition Source"
                   options={[
-                    { value: 'Website', label: 'Official Developer Website Form' },
-                    { value: 'MagicBricks', label: 'MagicBricks Real Estate Portal' },
+                    { value: 'Website', label: 'Website Inquiry' },
+                    { value: 'MagicBricks', label: 'MagicBricks Portal' },
                     { value: '99acres', label: '99acres Property Portal' },
-                    { value: 'Housing.com', label: 'Housing.com Direct Inquiry' },
-                    { value: 'Walk-in', label: 'Sales Experience Gallery Walk-in' },
-                    { value: 'Referral', label: 'Existing Resident / HNI Referral' },
-                    { value: 'Channel Partner', label: 'Registered Channel Partner / Broker' },
+                    { value: 'Housing.com', label: 'Housing.com Direct' },
+                    { value: 'Walk-in', label: 'Sales Gallery Walk-in' },
+                    { value: 'Referral', label: 'Existing Resident Referral' },
+                    { value: 'Channel Partner', label: 'Channel Partner / Broker' },
                   ]}
                   {...register('source')}
                 />
@@ -222,7 +233,7 @@ export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
             </CardContent>
           </Card>
 
-          {/* Section 2: Opportunity & Allocation */}
+          {/* Section 2: Pipeline Stage & Assignment */}
           <Card className="shadow-subtle border-slate-200/90 overflow-hidden">
             <div className="bg-slate-50/80 px-5 py-3 border-b border-slate-100 flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -230,68 +241,31 @@ export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
                   2
                 </span>
                 <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  Requirements & Assignment
+                  Pipeline & Assignment
                 </span>
               </div>
-              <span className="text-[11px] font-medium text-slate-400">Inventory & Stage Setup</span>
+              <span className="text-[11px] font-medium text-slate-400">Sales Funnel Setup</span>
             </div>
 
             <CardContent className="p-5 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Select
-                  label="Preferred Development Project"
-                  options={projects.map((p) => ({
-                    value: p.name,
-                    label: `${p.name} — ${p.city} (${p.startingPrice})`,
-                  }))}
-                  {...register('preferredProject')}
-                />
-
-                <Select
-                  label="Target Typology"
-                  options={[
-                    { value: '2 BHK Luxury', label: '2 BHK Luxury (1,240 - 1,450 sq.ft)' },
-                    { value: '3 BHK Grand', label: '3 BHK Grand (1,850 - 2,200 sq.ft)' },
-                    { value: '4 BHK Signature', label: '4 BHK Signature (2,800 - 3,400 sq.ft)' },
-                    { value: 'Penthouse / Sky Villa', label: 'Penthouse / Sky Villa (4,200+ sq.ft)' },
-                    { value: 'Commercial / Retail', label: 'Commercial Retail / Office Suite' },
-                  ]}
-                  {...register('unitType')}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <Select
-                  label="Target Budget Bracket"
-                  options={[
-                    { value: '₹50 L - ₹75 L', label: '₹50 L - ₹75 L (Affordable)' },
-                    { value: '₹75 L - ₹1.0 Cr', label: '₹75 L - ₹1.0 Cr' },
-                    { value: '₹1.0 Cr - ₹1.5 Cr', label: '₹1.0 Cr - ₹1.5 Cr (Mid-Premium)' },
-                    { value: '₹1.5 Cr - ₹2.5 Cr', label: '₹1.5 Cr - ₹2.5 Cr (Premium)' },
-                    { value: '₹2.5 Cr - ₹5.0 Cr', label: '₹2.5 Cr - ₹5.0 Cr (Luxury HNI)' },
-                    { value: '₹5.0 Cr+', label: '₹5.0 Cr+ (Ultra High Net Worth)' },
-                  ]}
-                  {...register('budget')}
-                />
-
-                <Select
                   label="Initial Pipeline Stage"
                   options={Object.values(LEAD_STAGES).map((st) => ({
                     value: st,
-                    label: `${STAGE_CONFIG[st].label} — Stage ${st}`,
+                    label: `${STAGE_CONFIG[st]?.label || st} (${st})`,
                   }))}
                   {...register('stage')}
                 />
-              </div>
 
-              <div>
                 <Select
                   label="Assigned Sales Representative"
+                  placeholder="Select representative"
                   options={employees.map((e) => ({
-                    value: e.id,
-                    label: `${e.name} — ${e.title} (${e.assignedProjects?.[0] || 'All Projects'})`,
+                    value: String(e.id),
+                    label: `${e.name} (${e.role})`,
                   }))}
-                  {...register('assignedToId')}
+                  {...register('assigned_to')}
                 />
               </div>
             </CardContent>
@@ -305,62 +279,25 @@ export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
                   3
                 </span>
                 <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  Initial Touchpoint & SLA
+                  Follow-up & Discussion Notes
                 </span>
               </div>
-              <span className="text-[11px] font-medium text-slate-400">First Action Schedule</span>
+              <span className="text-[11px] font-medium text-slate-400">Interaction Details</span>
             </div>
 
             <CardContent className="p-5 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
                 <Input
-                  label="Follow-up Date"
+                  label="Initial Follow-up Date"
                   type="date"
                   leftIcon={Calendar}
-                  {...register('followupDate')}
+                  {...register('follow_up_date')}
                 />
-
-                <Input
-                  label="Follow-up Time"
-                  type="text"
-                  placeholder="e.g. 11:30 AM"
-                  leftIcon={Clock}
-                  {...register('followupTime')}
-                />
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Priority Level
-                  </label>
-                  <div className="grid grid-cols-3 gap-1.5 pt-0.5">
-                    {['HIGH', 'MEDIUM', 'LOW'].map((p) => {
-                      const isSelected = watchedPriority === p;
-                      return (
-                        <button
-                          key={p}
-                          type="button"
-                          onClick={() => setValue('priority', p)}
-                          className={`py-2 px-1 text-center text-xs font-bold rounded-lg border transition-all ${
-                            isSelected
-                              ? p === 'HIGH'
-                                ? 'bg-rose-50 border-rose-400 text-rose-700 shadow-xs ring-1 ring-rose-300'
-                                : p === 'MEDIUM'
-                                ? 'bg-amber-50 border-amber-400 text-amber-700 shadow-xs ring-1 ring-amber-300'
-                                : 'bg-slate-100 border-slate-400 text-slate-700 shadow-xs'
-                              : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
-                          }`}
-                        >
-                          {p}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
 
               <Textarea
-                label={isEdit ? 'Update Notes' : 'Client Requirements / Discussion Log'}
-                placeholder="e.g. Looking for high floor 3 BHK with 2 covered car parking slots. Prefers east-facing entrance with unobstructed green views..."
+                label={isEdit ? 'Additional Notes' : 'Interaction Notes / Discussion Log'}
+                placeholder="Record customer preferences, site visit notes, or initial requirements..."
                 rows={3}
                 {...register('notes')}
               />
@@ -384,16 +321,15 @@ export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
                 leftIcon={Send}
                 className="shadow-sm"
               >
-                {isEdit ? 'Update Opportunity' : 'Create Opportunity'}
+                {isEdit ? 'Update Lead Details' : 'Create Opportunity'}
               </Button>
             </CardFooter>
           </Card>
         </form>
       </div>
 
-      {/* Right Column: Dynamic Live Preview & Enterprise SLA Cards (4 cols on lg) */}
+      {/* Right Column: Dynamic Live Preview Card (4 cols on lg) */}
       <div className="lg:col-span-4 space-y-5">
-        {/* Dynamic Opportunity Live Preview Card */}
         <Card className="border-slate-200/90 shadow-subtle overflow-hidden sticky top-20">
           <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-4">
             <div className="flex items-center justify-between">
@@ -401,25 +337,15 @@ export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
                 <Target className="w-3.5 h-3.5 text-brand-400" />
                 Live Opportunity Preview
               </span>
-              <Badge
-                variant={
-                  watchedPriority === 'HIGH'
-                    ? 'danger'
-                    : watchedPriority === 'MEDIUM'
-                    ? 'warning'
-                    : 'default'
-                }
-                size="xs"
-              >
-                {watchedPriority || 'MEDIUM'}
+              <Badge variant="brand" size="xs">
+                {watchedStage ? STAGE_CONFIG[watchedStage]?.label : 'NEW'}
               </Badge>
             </div>
             <h3 className="text-base font-bold text-white mt-1.5 truncate">
               {watchedName || 'Prospect Name Pending'}
             </h3>
             <p className="text-xs text-slate-300 flex items-center gap-1 mt-0.5">
-              <MapPin className="w-3 h-3 text-slate-400" />
-              {watch('city') || 'Location Unspecified'}
+              Source: {watchedSource || 'Website'}
             </p>
           </div>
 
@@ -432,35 +358,23 @@ export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
               </div>
               <div className="flex items-center gap-2 text-slate-700">
                 <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span className="truncate">{watchedEmail || 'email@domain.com'}</span>
+                <span className="truncate">{watchedEmail || 'No email provided'}</span>
               </div>
             </div>
 
-            {/* Target Property & Budget */}
+            {/* Stage & Touchpoint */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-slate-600">
-                <span className="text-slate-400">Target Project:</span>
-                <span className="font-semibold text-slate-900 text-right truncate max-w-[170px]">
-                  {watchedProject || selectedProj?.name || 'Prestige Falcon City'}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-slate-600">
-                <span className="text-slate-400">Typology:</span>
-                <span className="font-medium text-slate-800">{watchedUnitType || '3 BHK Grand'}</span>
-              </div>
-
-              <div className="flex items-center justify-between text-slate-600">
-                <span className="text-slate-400">Budget Range:</span>
-                <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                  {watchedBudget || '₹1.0 Cr - ₹1.5 Cr'}
-                </span>
-              </div>
-
               <div className="flex items-center justify-between text-slate-600">
                 <span className="text-slate-400">Pipeline Stage:</span>
                 <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-sky-50 text-sky-700 border border-sky-200">
                   {watchedStage ? STAGE_CONFIG[watchedStage]?.label : 'New Lead'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between text-slate-600">
+                <span className="text-slate-400">Scheduled Follow-up:</span>
+                <span className="font-semibold text-slate-800">
+                  {watchedFollowupDate || 'None scheduled'}
                 </span>
               </div>
             </div>
@@ -470,48 +384,19 @@ export function LeadForm({ initialData = null, isEdit = false, onSubmit }) {
               <p className="text-[11px] text-slate-400 mb-1.5">Assigned Opportunity Owner</p>
               <div className="flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-full bg-brand-600 text-white font-bold text-xs flex items-center justify-center">
-                  {assignedRep?.name?.[0] || 'A'}
+                  {assignedRep?.name?.[0] || 'U'}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs font-semibold text-slate-800 truncate">{assignedRep?.name}</p>
-                  <p className="text-[10px] text-slate-400 truncate">{assignedRep?.title}</p>
+                  <p className="text-xs font-semibold text-slate-800 truncate">
+                    {assignedRep?.name || 'Unassigned'}
+                  </p>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    {assignedRep?.email || 'Sales Consultant'}
+                  </p>
                 </div>
               </div>
             </div>
-
-            {/* SLA Badge */}
-            <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-lg">
-              <div className="flex items-center gap-1.5 text-amber-800 font-semibold text-[11px]">
-                <Zap className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span>Enterprise First-Touch SLA</span>
-              </div>
-              <p className="text-[11px] text-amber-700 mt-1 leading-relaxed">
-                Initial outreach must be logged within <strong>15 minutes</strong> of intake. Scheduled follow-up: {watch('followupTime') || '11:30 AM'}.
-              </p>
-            </div>
           </div>
-        </Card>
-
-        {/* Lead Automation Routing Card */}
-        <Card className="border-slate-200/90 shadow-subtle p-4 space-y-2.5 bg-white">
-          <div className="flex items-center gap-2 text-slate-900 font-semibold text-xs">
-            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>Automated Intake Workflows</span>
-          </div>
-          <ul className="space-y-1.5 text-[11px] text-slate-500">
-            <li className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-              <span>Instant WhatsApp & SMS introduction trigger</span>
-            </li>
-            <li className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-              <span>Project brochure auto-delivery to email</span>
-            </li>
-            <li className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-              <span>Round-robin executive capacity balancing</span>
-            </li>
-          </ul>
         </Card>
       </div>
     </div>

@@ -25,6 +25,13 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => {
     if (response.data && typeof response.data === 'object' && 'data' in response.data) {
+      if ('pagination' in response.data) {
+        return {
+          data: response.data.data,
+          pagination: response.data.pagination,
+          message: response.data.message,
+        };
+      }
       return response.data.data;
     }
     return response.data;
