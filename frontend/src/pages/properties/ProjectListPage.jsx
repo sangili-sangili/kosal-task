@@ -55,15 +55,46 @@ const COVER_PRESETS = [
   },
 ];
 
+import { propertyService } from '../../services/propertyService';
+
 export function ProjectListPage({ defaultOpenCreate = false }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { projects, units, addProject, updateProject, deleteProject } = useCrm();
+  const { setProjects: setContextProjects } = useCrm();
+
+  const [projects, setProjects] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(
     defaultOpenCreate || location.pathname.includes('/create') || location.pathname.includes('/new')
   );
+
+  const fetchProjects = async () => {
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      const data = await propertyService.getProjects();
+      const projectList = Array.isArray(data) ? data : [];
+      const enriched = projectList.map((p, idx) => ({
+        ...p,
+        coverImage: p.coverImage || COVER_PRESETS[idx % COVER_PRESETS.length].url,
+      }));
+      setProjects(enriched);
+      if (setContextProjects) setContextProjects(enriched);
+    } catch (err) {
+      console.error('Failed to fetch projects:', err);
+      setFetchError(err.message || 'Failed to fetch property developments');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProjects();
+  }, []);
 
   useEffect(() => {
     if (defaultOpenCreate || location.pathname.includes('/create') || location.pathname.includes('/new')) {
@@ -176,7 +207,7 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
     setFormErrors({});
   };
 
-  const handleCreateSubmit = (e) => {
+  const handleCreateSubmit = async (e) => {
     e.preventDefault();
     const errors = {};
     if (!formData.name.trim()) errors.name = 'Development project name is required';
@@ -188,37 +219,50 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
       return;
     }
 
-    const numTowers = parseInt(formData.totalTowers, 10) || 2;
-    const towerLetters = ['A', 'B', 'C', 'D', 'E'];
-    const generatedBuildings = Array.from({ length: numTowers }, (_, i) => ({
-      id: `bld-${Date.now()}-${i + 1}`,
-      name: `Tower ${towerLetters[i] || i + 1}`,
-      floors: parseInt(formData.floorsPerTower, 10) || 18,
-      totalUnits: 20,
-      availableUnits: 20,
-      bookedUnits: 0,
-    }));
+    setIsSubmitting(true);
+    try {
+      const fullLocation = [
+        formData.location.trim(),
+        formData.city,
+        formData.state !== 'Karnataka' ? formData.state : '',
+      ]
+        .filter(Boolean)
+        .join(', ');
 
-    const newProject = addProject({
-      name: formData.name.trim(),
-      country: formData.country || 'India',
-      state: formData.state || 'Karnataka',
-      city: formData.city,
-      location: formData.location.trim(),
-      priceRange: formData.priceRange.trim(),
-      startingPrice: formData.startingPrice.trim(),
-      possessionDate: formData.possessionDate.trim(),
-      description:
+      const desc =
         formData.description.trim() ||
-        'Master-planned residential development featuring premium amenities and landscaped greens.',
-      coverImage: formData.coverImage,
-      totalUnits: numTowers * 20,
-      availableUnits: numTowers * 20,
-      buildings: generatedBuildings,
-    });
+        `Master-planned residential development in ${formData.city || 'Bengaluru'}. Starting at ${formData.startingPrice}. Possession: ${formData.possessionDate}.`;
 
-    setIsCreateModalOpen(false);
-    navigate(`/properties/${newProject.id}`);
+      const newProject = await propertyService.createProject({
+        name: formData.name.trim(),
+        location: fullLocation,
+        description: desc,
+        status: 'ACTIVE',
+      });
+
+      // Create initial towers/buildings for this project in the live database
+      const numTowers = parseInt(formData.totalTowers, 10) || 1;
+      const towerLetters = ['A', 'B', 'C', 'D', 'E', 'F'];
+      for (let i = 0; i < numTowers; i++) {
+        try {
+          await propertyService.createBuilding(newProject.id, {
+            name: `Tower ${towerLetters[i] || i + 1}`,
+            description: `${formData.floorsPerTower || 18} Floors residential tower`,
+          });
+        } catch (bldErr) {
+          console.warn('Could not auto-create tower:', bldErr);
+        }
+      }
+
+      setIsCreateModalOpen(false);
+      await fetchProjects();
+      navigate(`/properties/${newProject.id}`);
+    } catch (err) {
+      console.error('Failed to create project:', err);
+      setFormErrors({ submit: err.message || 'Failed to create development project' });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Edit Handlers
@@ -228,11 +272,11 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
       name: proj.name || '',
       country: proj.country || 'India',
       state: proj.state || 'Karnataka',
-      city: proj.city || 'Bengaluru',
+      city: proj.city || (proj.location ? proj.location.split(',')[1]?.trim() : '') || 'Bengaluru',
       location: proj.location || '',
       priceRange: proj.priceRange || '',
       startingPrice: proj.startingPrice || '',
-      possessionDate: proj.possessionDate || '',
+      possessionDate: proj.possessionDate || 'Dec 2027',
       description: proj.description || '',
       coverImage: proj.coverImage || COVER_PRESETS[0].url,
     });
@@ -258,7 +302,7 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
     reader.readAsDataURL(file);
   };
 
-  const handleEditSubmit = (e) => {
+  const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (!editingProject) return;
     const errors = {};
@@ -270,20 +314,22 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
       return;
     }
 
-    updateProject(editingProject.id, {
-      name: editFormData.name.trim(),
-      country: editFormData.country || 'India',
-      state: editFormData.state || 'Karnataka',
-      city: editFormData.city,
-      location: editFormData.location.trim(),
-      priceRange: editFormData.priceRange.trim(),
-      startingPrice: editFormData.startingPrice.trim(),
-      possessionDate: editFormData.possessionDate.trim(),
-      description: editFormData.description.trim(),
-      coverImage: editFormData.coverImage,
-    });
+    setIsSubmitting(true);
+    try {
+      await propertyService.updateProject(editingProject.id, {
+        name: editFormData.name.trim(),
+        location: editFormData.location.trim(),
+        description: editFormData.description.trim(),
+      });
 
-    setEditingProject(null);
+      setEditingProject(null);
+      await fetchProjects();
+    } catch (err) {
+      console.error('Failed to update project:', err);
+      setEditErrors({ submit: err.message || 'Failed to update project' });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Delete Handlers
@@ -291,18 +337,27 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
     setDeletingProject(proj);
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (!deletingProject) return;
-    deleteProject(deletingProject.id);
-    setDeletingProject(null);
+    setIsSubmitting(true);
+    try {
+      await propertyService.deleteProject(deletingProject.id);
+      setDeletingProject(null);
+      await fetchProjects();
+    } catch (err) {
+      console.error('Failed to delete project:', err);
+      alert(err.message || 'Failed to delete project');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const filteredProjects = projects.filter((p) => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
-      p.name.toLowerCase().includes(q) ||
-      p.city.toLowerCase().includes(q) ||
+      p.name?.toLowerCase().includes(q) ||
+      p.city?.toLowerCase().includes(q) ||
       p.location?.toLowerCase().includes(q)
     );
   });
@@ -349,8 +404,34 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
         />
       </div>
 
-      {/* Empty State when no project matches */}
-      {filteredProjects.length === 0 ? (
+      {/* Loading Skeleton */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 animate-pulse">
+          {[1, 2, 3].map((n) => (
+            <div key={n} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+              <div className="h-48 bg-slate-200" />
+              <div className="p-5 space-y-4">
+                <div className="h-5 bg-slate-200 rounded w-2/3" />
+                <div className="h-3 bg-slate-100 rounded w-full" />
+                <div className="h-3 bg-slate-100 rounded w-4/5" />
+                <div className="pt-3 border-t border-slate-100 flex justify-between">
+                  <div className="h-4 bg-slate-200 rounded w-24" />
+                  <div className="h-4 bg-slate-200 rounded w-24" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : fetchError ? (
+        <div className="p-8 text-center bg-rose-50/60 rounded-2xl border border-rose-200 max-w-lg mx-auto">
+          <AlertTriangle className="w-8 h-8 text-rose-500 mx-auto mb-2" />
+          <h3 className="text-sm font-bold text-rose-900">Failed to load developments</h3>
+          <p className="text-xs text-rose-600 mt-1 mb-4">{fetchError}</p>
+          <Button variant="outline" size="sm" onClick={fetchProjects}>
+            Retry Loading
+          </Button>
+        </div>
+      ) : filteredProjects.length === 0 ? (
         <EmptyState
           icon={Building2}
           title="No projects match your search"
@@ -362,11 +443,25 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
         /* Projects Grid */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredProjects.map((project) => {
-            const projectUnits = units.filter((u) => u.projectId === project.id);
+            const projectUnits = project.buildings?.flatMap((b) => b.units || []) || [];
             const availableUnits = projectUnits.filter((u) => u.status === 'AVAILABLE').length;
-            const totalUnits = projectUnits.length || project.totalUnits || 30;
+            const totalUnits = projectUnits.length;
             const bookedUnits = totalUnits - availableUnits;
             const occupancyRate = totalUnits ? Math.round((bookedUnits / totalUnits) * 100) : 0;
+            const towersCount = project.buildings?.length || 0;
+
+            const city =
+              project.city ||
+              (project.location ? project.location.split(',')[1]?.trim() || project.location.split(',')[0]?.trim() : 'Prime City');
+
+            const unitPrices = projectUnits
+              .map((u) => Number(u.price))
+              .filter((p) => !isNaN(p) && p > 0);
+
+            const priceDisplay =
+              unitPrices.length > 0
+                ? `From ₹${(Math.min(...unitPrices) / 100000).toFixed(1)} L`
+                : project.priceRange || project.startingPrice || 'From ₹95 L';
 
             return (
               <div
@@ -415,10 +510,10 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
                   <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between text-white">
                     <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded bg-black/50 backdrop-blur-md border border-white/20">
                       <MapPin className="w-3 h-3 text-brand-300" />
-                      {project.city}
+                      {city}
                     </span>
                     <span className="text-xs font-semibold text-emerald-300 bg-emerald-950/70 px-2 py-0.5 rounded border border-emerald-500/30">
-                      {project.priceRange || `From ${project.startingPrice}`}
+                      {priceDisplay}
                     </span>
                   </div>
                 </div>
@@ -439,10 +534,10 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
                     <div className="flex items-center justify-between text-slate-600">
                       <span className="flex items-center gap-1">
                         <Building2 className="w-3.5 h-3.5 text-slate-400" />
-                        {project.buildings?.length || project.totalBuildings || 2} Towers
+                        {towersCount} {towersCount === 1 ? 'Tower' : 'Towers'}
                       </span>
                       <span className="font-semibold text-slate-800">
-                        {availableUnits} Units Available
+                        {totalUnits > 0 ? `${availableUnits} Units Available` : 'Configure Units'}
                       </span>
                     </div>
 
@@ -450,7 +545,9 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
                     <div>
                       <div className="flex justify-between text-[11px] text-slate-400 mb-1">
                         <span>Allotted / Booked</span>
-                        <span className="font-semibold text-slate-700">{occupancyRate}%</span>
+                        <span className="font-semibold text-slate-700">
+                          {totalUnits > 0 ? `${occupancyRate}% (${bookedUnits}/${totalUnits})` : '0%'}
+                        </span>
                       </div>
                       <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
                         <div
@@ -465,7 +562,7 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
                   <div className="pt-2 flex items-center justify-between border-t border-slate-100 text-xs font-semibold">
                     <span className="text-slate-400 flex items-center gap-1">
                       <Calendar className="w-3.5 h-3.5" />
-                      {project.possessionDate}
+                      {project.possessionDate || 'Dec 2027'}
                     </span>
                     <span className="text-brand-700 group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
                       View Project Details
@@ -772,11 +869,19 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
           />
 
+          {formErrors.submit && (
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{formErrors.submit}</span>
+            </div>
+          )}
+
           <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs pt-3 pb-1 border-t border-slate-100 flex items-center justify-end gap-3 -mx-6 px-6 shadow-xs mt-2">
             <Button
               type="button"
               variant="secondary"
               size="md"
+              disabled={isSubmitting}
               onClick={() => {
                 setIsCreateModalOpen(false);
                 if (location.pathname.includes('/create') || location.pathname.includes('/new')) {
@@ -786,8 +891,8 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
             >
               Cancel
             </Button>
-            <Button type="submit" variant="primary" size="md">
-              Create & Publish Development
+            <Button type="submit" variant="primary" size="md" disabled={isSubmitting}>
+              {isSubmitting ? 'Creating Project...' : 'Create & Publish Development'}
             </Button>
           </div>
         </form>
@@ -1009,17 +1114,25 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
             onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
           />
 
+          {editErrors.submit && (
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{editErrors.submit}</span>
+            </div>
+          )}
+
           <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs pt-3 pb-1 border-t border-slate-100 flex items-center justify-end gap-3 -mx-6 px-6 shadow-xs mt-2">
             <Button
               type="button"
               variant="secondary"
               size="md"
+              disabled={isSubmitting}
               onClick={() => setEditingProject(null)}
             >
               Cancel
             </Button>
-            <Button type="submit" variant="primary" size="md">
-              Save Changes
+            <Button type="submit" variant="primary" size="md" disabled={isSubmitting}>
+              {isSubmitting ? 'Saving Changes...' : 'Save Changes'}
             </Button>
           </div>
         </form>
@@ -1028,7 +1141,7 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
       {/* Delete Project Confirmation Modal */}
       <Modal
         isOpen={Boolean(deletingProject)}
-        onClose={() => setDeletingProject(null)}
+        onClose={() => !isSubmitting && setDeletingProject(null)}
         title={`Delete Development: ${deletingProject?.name || ''}?`}
         description="Are you sure you want to delete this property development?"
         size="sm"
@@ -1049,6 +1162,7 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
               type="button"
               variant="secondary"
               size="md"
+              disabled={isSubmitting}
               onClick={() => setDeletingProject(null)}
             >
               Keep Development
@@ -1057,10 +1171,11 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
               type="button"
               variant="danger"
               size="md"
+              disabled={isSubmitting}
               leftIcon={Trash2}
               onClick={handleDeleteConfirm}
             >
-              Confirm Delete
+              {isSubmitting ? 'Deleting...' : 'Confirm Delete'}
             </Button>
           </div>
         </div>

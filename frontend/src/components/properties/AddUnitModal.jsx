@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Layers,
   Building2,
@@ -7,8 +7,9 @@ import {
   DollarSign,
   Maximize2,
   CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
-import { useCrm } from '../../context/CrmContext';
+import { propertyService } from '../../services/propertyService';
 import { UNIT_STATUS } from '../../mock/mockData';
 import { formatINR } from '../../utils/crmFormatters';
 import Modal from '../ui/Modal';
@@ -22,68 +23,118 @@ export function AddUnitModal({
   defaultProjectId = '',
   defaultProjectName = '',
   towers = [],
+  onSuccess,
 }) {
-  const { projects, addUnit } = useCrm();
-
-  const selectedProj =
-    projects.find((p) => p.id === defaultProjectId || p.name === defaultProjectName) ||
-    projects[0];
-
-  const availableTowers = towers.length > 0 ? towers : selectedProj?.buildings || [];
+  const [projectOptions, setProjectOptions] = useState([]);
+  const [availableTowers, setAvailableTowers] = useState(towers);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState({});
 
   const [formData, setFormData] = useState({
-    projectId: defaultProjectId || selectedProj?.id || '',
-    projectName: defaultProjectName || selectedProj?.name || '',
-    buildingId: availableTowers[0]?.id || 'bld-1',
-    buildingName: availableTowers[0]?.name || 'Tower A',
+    projectId: defaultProjectId || '',
+    projectName: defaultProjectName || '',
+    buildingId: towers[0]?.id || '',
+    buildingName: towers[0]?.name || '',
     unitNumber: '',
     type: '3 BHK Grand',
     floor: '5',
     area: '1680',
     price: '13500000',
     facing: 'East',
-    status: UNIT_STATUS.AVAILABLE,
+    status: 'AVAILABLE',
   });
 
-  const [errors, setErrors] = useState({});
+  // Fetch projects list if not preset
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const loadProjectsAndTowers = async () => {
+      try {
+        const projs = await propertyService.getProjects();
+        const list = Array.isArray(projs) ? projs : [];
+        setProjectOptions(list);
+
+        const targetProjId = defaultProjectId || formData.projectId || list[0]?.id;
+        const targetProj = list.find((p) => String(p.id) === String(targetProjId)) || list[0];
+
+        if (targetProj) {
+          const blds = targetProj.buildings?.length > 0
+            ? targetProj.buildings
+            : await propertyService.getBuildings(targetProj.id);
+          setAvailableTowers(blds || []);
+
+          setFormData((prev) => ({
+            ...prev,
+            projectId: targetProj.id,
+            projectName: targetProj.name,
+            buildingId: prev.buildingId || blds[0]?.id || '',
+            buildingName: prev.buildingName || blds[0]?.name || '',
+          }));
+        }
+      } catch (err) {
+        console.error('Failed to load projects/towers in AddUnitModal:', err);
+      }
+    };
+
+    if (towers.length > 0) {
+      setAvailableTowers(towers);
+      setFormData((prev) => ({
+        ...prev,
+        projectId: defaultProjectId || prev.projectId,
+        projectName: defaultProjectName || prev.projectName,
+        buildingId: prev.buildingId || towers[0]?.id || '',
+        buildingName: prev.buildingName || towers[0]?.name || '',
+      }));
+    } else {
+      loadProjectsAndTowers();
+    }
+  }, [isOpen, defaultProjectId, defaultProjectName, towers]);
 
   // Quick fill sample unit
   const handleQuickFill = () => {
-    const tower = availableTowers[0] || { id: 'bld-1', name: 'Tower A' };
-    setFormData({
-      projectId: defaultProjectId || selectedProj?.id || '',
-      projectName: defaultProjectName || selectedProj?.name || '',
+    const tower = availableTowers[0] || { id: 1, name: 'Tower A' };
+    const towerLetter = (tower.name || 'A').replace(/[^a-zA-Z]/g, '') || 'A';
+    setFormData((prev) => ({
+      ...prev,
       buildingId: tower.id,
       buildingName: tower.name,
-      unitNumber: `${tower.name.replace('Tower ', '')}-1204`,
+      unitNumber: `${towerLetter}-1204`,
       type: '3 BHK Grand',
       floor: '12',
       area: '1750',
       price: '14200000',
       facing: 'East',
-      status: UNIT_STATUS.AVAILABLE,
-    });
+      status: 'AVAILABLE',
+    }));
     setErrors({});
   };
 
-  const handleProjectChange = (e) => {
+  const handleProjectChange = async (e) => {
     const pId = e.target.value;
-    const proj = projects.find((p) => p.id === pId);
+    const proj = projectOptions.find((p) => String(p.id) === String(pId));
     if (proj) {
-      const firstTower = proj.buildings?.[0] || { id: 'bld-1', name: 'Tower A' };
+      let blds = proj.buildings || [];
+      if (!blds.length) {
+        try {
+          blds = await propertyService.getBuildings(proj.id);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      setAvailableTowers(blds);
       setFormData((prev) => ({
         ...prev,
         projectId: proj.id,
         projectName: proj.name,
-        buildingId: firstTower.id,
-        buildingName: firstTower.name,
+        buildingId: blds[0]?.id || '',
+        buildingName: blds[0]?.name || '',
       }));
     }
   };
 
   const handleTowerChange = (e) => {
     const bldId = e.target.value;
-    const tower = availableTowers.find((b) => b.id === bldId);
+    const tower = availableTowers.find((b) => String(b.id) === String(bldId));
     if (tower) {
       setFormData((prev) => ({
         ...prev,
@@ -93,13 +144,14 @@ export function AddUnitModal({
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const newErrors = {};
+    if (!formData.buildingId) newErrors.buildingId = 'Please select a tower/building';
     if (!formData.unitNumber.trim()) newErrors.unitNumber = 'Unit number is required (e.g. A-304)';
-    if (!formData.area || parseInt(formData.area, 10) <= 0)
+    if (!formData.area || parseFloat(formData.area) <= 0)
       newErrors.area = 'Enter valid super area in sq ft';
-    if (!formData.price || parseInt(formData.price, 10) <= 0)
+    if (!formData.price || parseFloat(formData.price) <= 0)
       newErrors.price = 'Enter valid base price';
 
     if (Object.keys(newErrors).length > 0) {
@@ -107,21 +159,32 @@ export function AddUnitModal({
       return;
     }
 
-    addUnit({
-      ...formData,
-      unitNumber: formData.unitNumber.trim(),
-      floor: parseInt(formData.floor, 10) || 1,
-      area: parseInt(formData.area, 10) || 1500,
-      price: parseInt(formData.price, 10) || 10000000,
-    });
+    setIsSubmitting(true);
+    try {
+      await propertyService.createUnit({
+        building_id: parseInt(formData.buildingId, 10),
+        unit_number: formData.unitNumber.trim(),
+        unit_type: formData.type.trim(),
+        floor: parseInt(formData.floor, 10) || 1,
+        area: parseFloat(formData.area) || 1500,
+        price: parseFloat(formData.price) || 10000000,
+        status: formData.status || 'AVAILABLE',
+      });
 
-    onClose();
+      if (onSuccess) onSuccess();
+      onClose();
+    } catch (err) {
+      console.error('Failed to create unit in live backend:', err);
+      setErrors({ submit: err.message || 'Failed to create unit in database' });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={() => !isSubmitting && onClose()}
       title={
         defaultProjectName
           ? `Add Inventory Unit to ${defaultProjectName}`
@@ -159,9 +222,9 @@ export function AddUnitModal({
               disabled={Boolean(defaultProjectId)}
               value={formData.projectId}
               onChange={handleProjectChange}
-              options={projects.map((p) => ({
+              options={projectOptions.map((p) => ({
                 value: p.id,
-                label: `${p.name} (${p.city})`,
+                label: p.name,
               }))}
             />
             {defaultProjectName && (
@@ -179,7 +242,7 @@ export function AddUnitModal({
               onChange={handleTowerChange}
               options={availableTowers.map((b) => ({
                 value: b.id,
-                label: `${b.name} (${b.floors} Floors)`,
+                label: `${b.name}${b.description ? ` (${b.description})` : ''}`,
               }))}
             />
           </div>
@@ -276,13 +339,20 @@ export function AddUnitModal({
           </div>
         </div>
 
+        {errors.submit && (
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+            <span>{errors.submit}</span>
+          </div>
+        )}
+
         {/* Modal Action Buttons */}
         <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs pt-3 pb-1 border-t border-slate-100 flex items-center justify-end gap-3 -mx-6 px-6 shadow-xs mt-2">
-          <Button type="button" variant="secondary" size="md" onClick={onClose}>
+          <Button type="button" variant="secondary" size="md" disabled={isSubmitting} onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" variant="primary" size="md" leftIcon={Layers}>
-            Save & Add Unit to Catalog
+          <Button type="submit" variant="primary" size="md" leftIcon={Layers} disabled={isSubmitting}>
+            {isSubmitting ? 'Saving Unit...' : 'Save & Add Unit to Catalog'}
           </Button>
         </div>
       </form>

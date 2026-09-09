@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Layers,
@@ -10,8 +10,9 @@ import {
   Eye,
   RotateCcw,
   Plus,
+  AlertTriangle,
 } from 'lucide-react';
-import { useCrm } from '../../context/CrmContext';
+import { propertyService } from '../../services/propertyService';
 import { UNIT_STATUS } from '../../mock/mockData';
 import { formatINR, formatINRCompact } from '../../utils/crmFormatters';
 import Table from '../../components/ui/Table';
@@ -24,10 +25,16 @@ import AddUnitModal from '../../components/properties/AddUnitModal';
 
 export function UnitListPage() {
   const navigate = useNavigate();
-  const { units, projects } = useCrm();
+
+  // Live Inventory & Project State
+  const [units, setUnits] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
   // Filters State
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [projectFilter, setProjectFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -35,47 +42,73 @@ export function UnitListPage() {
   // Pagination State
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   // Sorting
-  const [sortBy, setSortBy] = useState('unitNumber');
+  const [sortBy, setSortBy] = useState('unit_number');
   const [sortOrder, setSortOrder] = useState('ASC');
 
   // Selected Unit Inspection Modal
   const [inspectedUnit, setInspectedUnit] = useState(null);
   const [isAddUnitModalOpen, setIsAddUnitModalOpen] = useState(false);
 
-  // Filter Units
-  const filteredUnits = useMemo(() => {
-    return units
-      .filter((u) => {
-        if (projectFilter && u.projectName !== projectFilter) return false;
-        if (typeFilter && u.type !== typeFilter) return false;
-        if (statusFilter && u.status !== statusFilter) return false;
-        if (searchTerm) {
-          const q = searchTerm.toLowerCase();
-          const matchNum = u.unitNumber.toLowerCase().includes(q);
-          const matchBld = u.buildingName.toLowerCase().includes(q);
-          const matchProj = u.projectName.toLowerCase().includes(q);
-          if (!matchNum && !matchBld && !matchProj) return false;
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        let valA = a[sortBy] ?? '';
-        let valB = b[sortBy] ?? '';
-        if (sortOrder === 'ASC') {
-          return valA > valB ? 1 : -1;
-        }
-        return valA < valB ? 1 : -1;
-      });
-  }, [units, projectFilter, typeFilter, statusFilter, searchTerm, sortBy, sortOrder]);
+  // Debounce search input
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setPage(1);
+    }, 350);
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
 
-  const totalItems = filteredUnits.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-  const paginatedUnits = filteredUnits.slice((page - 1) * pageSize, page * pageSize);
+  // Load projects list for filtering
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        const data = await propertyService.getProjects();
+        setProjects(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error('Failed to load projects list for filter:', err);
+      }
+    };
+    loadProjects();
+  }, []);
+
+  // Fetch paginated units from live MySQL API
+  const fetchUnits = useCallback(async () => {
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      const params = {
+        page,
+        limit: pageSize,
+        search: debouncedSearch.trim() || undefined,
+        project_id: projectFilter || undefined,
+        unit_type: typeFilter || undefined,
+        status: statusFilter || undefined,
+        sort: sortBy,
+        order: sortOrder,
+      };
+      const res = await propertyService.getUnits(params);
+      setUnits(res.units || []);
+      setTotalItems(res.pagination?.total || (res.units ? res.units.length : 0));
+      setTotalPages(res.pagination?.totalPages || 1);
+    } catch (err) {
+      console.error('Failed to fetch units:', err);
+      setFetchError(err.message || 'Failed to load inventory units');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [page, pageSize, debouncedSearch, projectFilter, typeFilter, statusFilter, sortBy, sortOrder]);
+
+  useEffect(() => {
+    fetchUnits();
+  }, [fetchUnits]);
 
   const handleResetFilters = () => {
     setSearchTerm('');
+    setDebouncedSearch('');
     setProjectFilter('');
     setTypeFilter('');
     setStatusFilter('');
@@ -83,40 +116,50 @@ export function UnitListPage() {
   };
 
   const handleSort = (key, order) => {
-    setSortBy(key);
+    const mappedKey = key === 'unitNumber' ? 'unit_number' : key;
+    setSortBy(mappedKey);
     setSortOrder(order);
   };
 
   const columns = [
     {
-      key: 'unitNumber',
+      key: 'unit_number',
       title: 'Unit No.',
       sortable: true,
-      render: (num, row) => (
-        <button
-          type="button"
-          onClick={() => setInspectedUnit(row)}
-          className="font-mono text-xs font-bold text-brand-700 hover:underline cursor-pointer"
-        >
-          {num}
-        </button>
-      ),
+      render: (_, row) => {
+        const num = row.unit_number || row.unitNumber;
+        return (
+          <button
+            type="button"
+            onClick={() => setInspectedUnit(row)}
+            className="font-mono text-xs font-bold text-brand-700 hover:underline cursor-pointer"
+          >
+            {num}
+          </button>
+        );
+      },
     },
     {
-      key: 'projectName',
+      key: 'project_name',
       title: 'Project & Tower',
-      sortable: true,
-      render: (_, row) => (
-        <div>
-          <div className="font-semibold text-slate-900 text-xs">{row.projectName}</div>
-          <div className="text-[11px] text-slate-500 font-mono">{row.buildingName}</div>
-        </div>
-      ),
+      sortable: false,
+      render: (_, row) => {
+        const projName = row.building?.project?.name || row.projectName || 'Residential';
+        const bldName = row.building?.name || row.buildingName || 'Tower Block';
+        return (
+          <div>
+            <div className="font-semibold text-slate-900 text-xs">{projName}</div>
+            <div className="text-[11px] text-slate-500 font-mono">{bldName}</div>
+          </div>
+        );
+      },
     },
     {
-      key: 'type',
+      key: 'unit_type',
       title: 'Config',
-      render: (type) => <span className="font-semibold text-slate-800 text-xs">{type}</span>,
+      render: (_, row) => (
+        <span className="font-semibold text-slate-800 text-xs">{row.unit_type || row.type}</span>
+      ),
     },
     {
       key: 'floor',
@@ -133,7 +176,7 @@ export function UnitListPage() {
     {
       key: 'facing',
       title: 'Facing',
-      render: (facing) => <span className="text-xs text-slate-500">{facing || '—'}</span>,
+      render: (facing) => <span className="text-xs text-slate-500">{facing || 'East'}</span>,
     },
     {
       key: 'price',
@@ -238,7 +281,7 @@ export function UnitListPage() {
               setProjectFilter(e.target.value);
               setPage(1);
             }}
-            options={projects.map((p) => ({ value: p.name, label: p.name }))}
+            options={projects.map((p) => ({ value: p.id, label: p.name }))}
           />
 
           <Select
@@ -249,10 +292,10 @@ export function UnitListPage() {
               setPage(1);
             }}
             options={[
-              { value: '1 BHK', label: '1 BHK' },
-              { value: '2 BHK', label: '2 BHK' },
-              { value: '3 BHK', label: '3 BHK' },
-              { value: '4 BHK Luxury', label: '4 BHK Luxury' },
+              { value: '1BHK', label: '1 BHK' },
+              { value: '2BHK', label: '2 BHK' },
+              { value: '3BHK', label: '3 BHK' },
+              { value: '4BHK', label: '4 BHK' },
             ]}
           />
 
@@ -264,9 +307,9 @@ export function UnitListPage() {
               setPage(1);
             }}
             options={[
-              { value: UNIT_STATUS.AVAILABLE, label: 'Available Only' },
-              { value: UNIT_STATUS.BOOKED, label: 'Booked Only' },
-              { value: UNIT_STATUS.BLOCKED, label: 'Blocked Only' },
+              { value: 'AVAILABLE', label: 'Available Only' },
+              { value: 'BOOKED', label: 'Booked Only' },
+              { value: 'BLOCKED', label: 'Blocked Only' },
             ]}
           />
         </div>
@@ -274,7 +317,7 @@ export function UnitListPage() {
         {(searchTerm || projectFilter || typeFilter || statusFilter) && (
           <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs text-slate-500">
             <span>
-              Showing <strong className="text-slate-900">{filteredUnits.length}</strong> matching units
+              Showing <strong className="text-slate-900">{totalItems}</strong> matching units
             </span>
             <button
               type="button"
@@ -288,11 +331,24 @@ export function UnitListPage() {
         )}
       </div>
 
+      {fetchError && (
+        <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{fetchError}</span>
+          </div>
+          <Button variant="outline" size="xs" onClick={fetchUnits}>
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Inventory Table */}
       <div className="space-y-3">
         <Table
           columns={columns}
-          data={paginatedUnits}
+          data={units}
+          isLoading={isLoading}
           sortBy={sortBy}
           sortOrder={sortOrder}
           onSort={handleSort}
@@ -319,8 +375,8 @@ export function UnitListPage() {
       <Modal
         isOpen={Boolean(inspectedUnit)}
         onClose={() => setInspectedUnit(null)}
-        title={`Unit ${inspectedUnit?.unitNumber} Details`}
-        description={`${inspectedUnit?.projectName} • ${inspectedUnit?.buildingName}`}
+        title={`Unit ${inspectedUnit?.unit_number || inspectedUnit?.unitNumber} Details`}
+        description={`${inspectedUnit?.building?.project?.name || inspectedUnit?.projectName || 'Project'} • ${inspectedUnit?.building?.name || inspectedUnit?.buildingName || 'Tower'}`}
         maxWidth="max-w-md"
       >
         {inspectedUnit && (
@@ -330,7 +386,9 @@ export function UnitListPage() {
                 <span className="text-slate-400 font-semibold uppercase text-[10px]">
                   Configuration
                 </span>
-                <div className="font-bold text-slate-900 mt-0.5">{inspectedUnit.type}</div>
+                <div className="font-bold text-slate-900 mt-0.5">
+                  {inspectedUnit.unit_type || inspectedUnit.type}
+                </div>
               </div>
               <div>
                 <span className="text-slate-400 font-semibold uppercase text-[10px]">Floor</span>
@@ -355,9 +413,9 @@ export function UnitListPage() {
                 <div className="mt-0.5">
                   <span
                     className={
-                      inspectedUnit.status === UNIT_STATUS.AVAILABLE
+                      inspectedUnit.status === 'AVAILABLE'
                         ? 'badge-available'
-                        : inspectedUnit.status === UNIT_STATUS.BOOKED
+                        : inspectedUnit.status === 'BOOKED'
                         ? 'badge-booked'
                         : 'badge-blocked'
                     }
@@ -368,17 +426,15 @@ export function UnitListPage() {
               </div>
             </div>
 
-            {inspectedUnit.status === UNIT_STATUS.BOOKED && (
+            {inspectedUnit.status === 'BOOKED' && (
               <div className="p-3 bg-blue-50/60 rounded-lg border border-blue-200 text-xs text-blue-900">
-                <span className="font-semibold">Booking Record:</span> Allocated to{' '}
-                <strong>{inspectedUnit.bookedBy || 'Client'}</strong> with token deposit of{' '}
-                <strong>{formatINR(inspectedUnit.bookedAmount || 1000000)}</strong>.
+                <span className="font-semibold">Booking Record:</span> Allocated to registered client.
               </div>
             )}
 
-            {inspectedUnit.status === UNIT_STATUS.BLOCKED && (
+            {inspectedUnit.status === 'BLOCKED' && (
               <div className="p-3 bg-amber-50/60 rounded-lg border border-amber-200 text-xs text-amber-900">
-                <span className="font-semibold">Reason:</span> {inspectedUnit.blockedReason || 'Reserved by Management'}
+                <span className="font-semibold">Reason:</span> Reserved by Management.
               </div>
             )}
 
@@ -386,7 +442,7 @@ export function UnitListPage() {
               <Button variant="secondary" size="sm" onClick={() => setInspectedUnit(null)}>
                 Close
               </Button>
-              {inspectedUnit.status === UNIT_STATUS.AVAILABLE && (
+              {inspectedUnit.status === 'AVAILABLE' && (
                 <Link to={`/bookings/create?unitId=${inspectedUnit.id}`}>
                   <Button variant="primary" size="sm" leftIcon={BookmarkCheck}>
                     Book This Unit
@@ -402,6 +458,7 @@ export function UnitListPage() {
       <AddUnitModal
         isOpen={isAddUnitModalOpen}
         onClose={() => setIsAddUnitModalOpen(false)}
+        onSuccess={fetchUnits}
       />
     </div>
   );

@@ -655,7 +655,9 @@ export function CrmProvider({ children }) {
       value={{
         leads,
         projects,
+        setProjects,
         units,
+        setUnits,
         bookings,
         employees,
         users: employees,

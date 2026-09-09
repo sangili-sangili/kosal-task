@@ -18,6 +18,13 @@ class ProjectRepository extends BaseRepository {
           model: Building,
           as: 'buildings',
           attributes: ['id', 'name', 'description'],
+          include: [
+            {
+              model: Unit,
+              as: 'units',
+              attributes: ['id', 'status', 'price', 'unit_type', 'unit_number'],
+            },
+          ],
         },
       ],
       order: [['created_at', 'DESC']],

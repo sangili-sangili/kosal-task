@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -25,7 +25,7 @@ import {
   AlertTriangle,
   Plus,
 } from 'lucide-react';
-import { useCrm } from '../../context/CrmContext';
+import { propertyService } from '../../services/propertyService';
 import { UNIT_STATUS } from '../../mock/mockData';
 import { formatINRCompact, formatINR } from '../../utils/crmFormatters';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
@@ -67,23 +67,26 @@ export function ProjectDetailPage() {
   const { id, projectId } = useParams();
   const currentProjectId = id || projectId;
   const navigate = useNavigate();
-  const { projects, units, updateProject, deleteProject } = useCrm();
 
-  const project = projects.find(
-    (p) =>
-      p.id === currentProjectId ||
-      p.name.toLowerCase().replace(/\s+/g, '-') === currentProjectId?.toLowerCase()
-  );
+  const [project, setProject] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [selectedBuildingId, setSelectedBuildingId] = useState('');
   const [bhkFilter, setBhkFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [unitSearch, setUnitSearch] = useState('');
 
-  // Edit and Delete Modal State
+  // Modals State
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isAddUnitModalOpen, setIsAddUnitModalOpen] = useState(false);
+  const [isAddTowerModalOpen, setIsAddTowerModalOpen] = useState(false);
+
+  // Tower Form State
+  const [towerFormData, setTowerFormData] = useState({ name: '', description: '18 Floors residential block' });
+  const [towerErrors, setTowerErrors] = useState({});
 
   // Edit Form State
   const [editFormData, setEditFormData] = useState({
@@ -105,17 +108,42 @@ export function ProjectDetailPage() {
   const [editUploadedFileName, setEditUploadedFileName] = useState('');
   const [editIsDragging, setEditIsDragging] = useState(false);
 
+  const fetchProjectDetails = async () => {
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      const data = await propertyService.getProjectById(currentProjectId``);
+      if (!data) throw new Error('Development project not found');
+      const presetCover = COVER_PRESETS[(data.id || 0) % COVER_PRESETS.length]?.url;
+      setProject({
+        ...data,
+        coverImage: data.coverImage || presetCover,
+      });
+    } catch (err) {
+      console.error('Failed to fetch project details:', err);
+      setFetchError(err.message || 'Failed to fetch project details');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentProjectId) {
+      fetchProjectDetails();
+    }
+  }, [currentProjectId]);
+
   const openEditModal = () => {
     if (!project) return;
     setEditFormData({
       name: project.name || '',
       country: project.country || 'India',
       state: project.state || 'Karnataka',
-      city: project.city || 'Bengaluru',
+      city: project.city || (project.location ? project.location.split(',')[1]?.trim() : '') || 'Bengaluru',
       location: project.location || '',
       priceRange: project.priceRange || '',
       startingPrice: project.startingPrice || '',
-      possessionDate: project.possessionDate || '',
+      possessionDate: project.possessionDate || 'Dec 2027',
       description: project.description || '',
       coverImage: project.coverImage || COVER_PRESETS[0].url,
     });
@@ -142,7 +170,7 @@ export function ProjectDetailPage() {
     reader.readAsDataURL(file);
   };
 
-  const handleEditSubmit = (e) => {
+  const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (!project) return;
     const errors = {};
@@ -154,52 +182,122 @@ export function ProjectDetailPage() {
       return;
     }
 
-    updateProject(project.id, {
-      name: editFormData.name.trim(),
-      country: editFormData.country || 'India',
-      state: editFormData.state || 'Karnataka',
-      city: editFormData.city,
-      location: editFormData.location.trim(),
-      priceRange: editFormData.priceRange.trim(),
-      startingPrice: editFormData.startingPrice.trim(),
-      possessionDate: editFormData.possessionDate.trim(),
-      description: editFormData.description.trim(),
-      coverImage: editFormData.coverImage,
-    });
-
-    setIsEditModalOpen(false);
+    setIsSubmitting(true);
+    try {
+      await propertyService.updateProject(project.id, {
+        name: editFormData.name.trim(),
+        location: editFormData.location.trim(),
+        description: editFormData.description.trim(),
+      });
+      setIsEditModalOpen(false);
+      await fetchProjectDetails();
+    } catch (err) {
+      console.error('Failed to update project:', err);
+      setEditErrors({ submit: err.message || 'Failed to update development project' });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (!project) return;
-    deleteProject(project.id);
-    setIsDeleteModalOpen(false);
-    navigate('/properties');
+    setIsSubmitting(true);
+    try {
+      await propertyService.deleteProject(project.id);
+      setIsDeleteModalOpen(false);
+      navigate('/properties');
+    } catch (err) {
+      console.error('Failed to delete project:', err);
+      alert(err.message || 'Failed to delete project');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  if (!project) {
+  const handleAddTowerSubmit = async (e) => {
+    e.preventDefault();
+    if (!towerFormData.name.trim()) {
+      setTowerErrors({ name: 'Tower name is required (e.g. Tower C)' });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await propertyService.createBuilding(project.id, {
+        name: towerFormData.name.trim(),
+        description: towerFormData.description.trim() || 'Residential Tower Block',
+      });
+      setIsAddTowerModalOpen(false);
+      setTowerFormData({ name: '', description: '18 Floors residential block' });
+      setTowerErrors({});
+      await fetchProjectDetails();
+    } catch (err) {
+      console.error('Failed to create tower building:', err);
+      setTowerErrors({ submit: err.message || 'Failed to add tower building' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Flatten nested units from live buildings
+  const projectUnits = useMemo(() => {
+    if (!project || !project.buildings) return [];
+    return project.buildings.flatMap((bld) =>
+      (bld.units || []).map((u) => ({
+        id: u.id,
+        buildingId: bld.id,
+        buildingName: bld.name,
+        unitNumber: u.unit_number,
+        type: u.unit_type,
+        floor: u.floor,
+        area: u.area,
+        price: u.price,
+        status: u.status,
+        facing: u.facing || 'East',
+        projectId: project.id,
+        projectName: project.name,
+      }))
+    );
+  }, [project]);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6 animate-pulse">
+        <div className="h-6 w-48 bg-slate-200 rounded" />
+        <div className="h-64 bg-slate-200 rounded-2xl" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-24 bg-slate-200 rounded-xl" />
+          ))}
+        </div>
+        <div className="h-48 bg-slate-200 rounded-2xl" />
+      </div>
+    );
+  }
+
+  if (fetchError || !project) {
     return (
       <div className="max-w-xl mx-auto p-12 text-center bg-white rounded-2xl border border-slate-200/90 shadow-subtle mt-10">
-        <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-4">
+        <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center mx-auto mb-4">
           <Building2 className="w-6 h-6" />
         </div>
         <h2 className="text-xl font-bold text-slate-900">Project Not Found</h2>
         <p className="text-sm text-slate-500 mt-1.5">
-          No development project matches ID <code className="font-mono text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded">{currentProjectId}</code>.
+          {fetchError || `No development project matches ID ${currentProjectId}.`}
         </p>
-        <div className="mt-6">
+        <div className="mt-6 flex items-center justify-center gap-3">
           <Link to="/properties">
             <Button variant="primary" size="md" leftIcon={ArrowLeft}>
               Back to All Projects
             </Button>
           </Link>
+          <Button variant="outline" size="md" onClick={fetchProjectDetails}>
+            Retry Loading
+          </Button>
         </div>
       </div>
     );
   }
-
-  // Filter project units
-  const projectUnits = units.filter((u) => u.projectId === project.id);
   const totalUnits = projectUnits.length;
   const availableUnits = projectUnits.filter((u) => u.status === UNIT_STATUS.AVAILABLE).length;
   const bookedUnits = projectUnits.filter((u) => u.status === UNIT_STATUS.BOOKED).length;
@@ -481,57 +579,85 @@ export function ProjectDetailPage() {
 
       {/* Buildings List / Tower Selector */}
       <Card className="border-slate-200/90 shadow-subtle">
-        <CardHeader>
+        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <CardTitle>Architectural Towers & Blocks</CardTitle>
             <CardDescription>Select any tower to inspect floor plans and unit availability</CardDescription>
           </div>
-          {selectedBuildingId && (
-            <button
+          <div className="flex items-center gap-2">
+            {selectedBuildingId && (
+              <button
+                type="button"
+                onClick={() => setSelectedBuildingId('')}
+                className="text-xs font-semibold text-brand-600 hover:text-brand-800 hover:underline mr-2"
+              >
+                Reset / Show All Towers
+              </button>
+            )}
+            <Button
               type="button"
-              onClick={() => setSelectedBuildingId('')}
-              className="text-xs font-semibold text-brand-600 hover:text-brand-800 hover:underline"
+              variant="outline"
+              size="sm"
+              leftIcon={Plus}
+              onClick={() => setIsAddTowerModalOpen(true)}
+              className="text-xs"
             >
-              Reset / Show All Towers
-            </button>
-          )}
+              Add Tower / Block
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {project.buildings?.map((bld) => {
-              const isSelected = selectedBuildingId === bld.id;
-              const bldUnits = projectUnits.filter((u) => u.buildingId === bld.id);
-              const bldAvail = bldUnits.filter((u) => u.status === UNIT_STATUS.AVAILABLE).length;
+          {(!project.buildings || project.buildings.length === 0) ? (
+            <div className="p-6 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
+              <Building2 className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+              <p className="text-xs font-semibold text-slate-700">No architectural towers added yet</p>
+              <p className="text-[11px] text-slate-500 mt-0.5 mb-3">Add towers to configure units and start booking allotments</p>
+              <Button
+                variant="primary"
+                size="xs"
+                leftIcon={Plus}
+                onClick={() => setIsAddTowerModalOpen(true)}
+              >
+                Add First Tower
+              </Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {project.buildings.map((bld) => {
+                const isSelected = selectedBuildingId === bld.id;
+                const bldUnits = projectUnits.filter((u) => u.buildingId === bld.id);
+                const bldAvail = bldUnits.filter((u) => u.status === UNIT_STATUS.AVAILABLE).length;
 
-              return (
-                <div
-                  key={bld.id}
-                  onClick={() => setSelectedBuildingId(isSelected ? '' : bld.id)}
-                  className={`p-4 rounded-xl border transition-all cursor-pointer text-left ${
-                    isSelected
-                      ? 'border-slate-900 bg-slate-900 text-white shadow-md'
-                      : 'border-slate-200 bg-slate-50/60 hover:bg-white hover:border-slate-300 shadow-2xs'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-sm">{bld.name}</h4>
-                    <span className={`text-[11px] font-mono ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
-                      {bld.floors} Floors
-                    </span>
-                  </div>
+                return (
+                  <div
+                    key={bld.id}
+                    onClick={() => setSelectedBuildingId(isSelected ? '' : bld.id)}
+                    className={`p-4 rounded-xl border transition-all cursor-pointer text-left ${
+                      isSelected
+                        ? 'border-slate-900 bg-slate-900 text-white shadow-md'
+                        : 'border-slate-200 bg-slate-50/60 hover:bg-white hover:border-slate-300 shadow-2xs'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-bold text-sm">{bld.name}</h4>
+                      <span className={`text-[11px] font-mono ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
+                        {bld.description || 'Tower Block'}
+                      </span>
+                    </div>
 
-                  <div className="mt-3 flex items-center justify-between text-xs">
-                    <span className={isSelected ? 'text-slate-300' : 'text-slate-500'}>
-                      Units Available:
-                    </span>
-                    <span className={`font-bold font-mono ${isSelected ? 'text-emerald-300' : 'text-emerald-700'}`}>
-                      {bldAvail} Available
-                    </span>
+                    <div className="mt-3 flex items-center justify-between text-xs">
+                      <span className={isSelected ? 'text-slate-300' : 'text-slate-500'}>
+                        Units Available:
+                      </span>
+                      <span className={`font-bold font-mono ${isSelected ? 'text-emerald-300' : 'text-emerald-700'}`}>
+                        {bldAvail} Available
+                      </span>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -823,17 +949,25 @@ export function ProjectDetailPage() {
             onChange={(e) => setEditFormData({ ...editFormData, description: e.target.value })}
           />
 
+          {editErrors.submit && (
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{editErrors.submit}</span>
+            </div>
+          )}
+
           <div className="sticky bottom-0 bg-white/95 backdrop-blur-xs pt-3 pb-1 border-t border-slate-100 flex items-center justify-end gap-3 -mx-6 px-6 shadow-xs mt-2">
             <Button
               type="button"
               variant="secondary"
               size="md"
+              disabled={isSubmitting}
               onClick={() => setIsEditModalOpen(false)}
             >
               Cancel
             </Button>
-            <Button type="submit" variant="primary" size="md">
-              Save Changes
+            <Button type="submit" variant="primary" size="md" disabled={isSubmitting}>
+              {isSubmitting ? 'Saving Changes...' : 'Save Changes'}
             </Button>
           </div>
         </form>
@@ -842,7 +976,7 @@ export function ProjectDetailPage() {
       {/* Delete Project Confirmation Modal */}
       <Modal
         isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
+        onClose={() => !isSubmitting && setIsDeleteModalOpen(false)}
         title={`Delete Development: ${project.name}?`}
         description="Are you sure you want to delete this property development?"
         size="sm"
@@ -865,6 +999,7 @@ export function ProjectDetailPage() {
               type="button"
               variant="secondary"
               size="md"
+              disabled={isSubmitting}
               onClick={() => setIsDeleteModalOpen(false)}
             >
               Keep Development
@@ -873,13 +1008,68 @@ export function ProjectDetailPage() {
               type="button"
               variant="danger"
               size="md"
+              disabled={isSubmitting}
               leftIcon={Trash2}
               onClick={handleDeleteConfirm}
             >
-              Confirm Delete
+              {isSubmitting ? 'Deleting...' : 'Confirm Delete'}
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Add Tower Modal */}
+      <Modal
+        isOpen={isAddTowerModalOpen}
+        onClose={() => !isSubmitting && setIsAddTowerModalOpen(false)}
+        title={`Add Tower to ${project.name}`}
+        description="Create a new architectural tower or block in this development"
+        size="sm"
+      >
+        <form onSubmit={handleAddTowerSubmit} className="space-y-4">
+          <Input
+            label="Tower / Building Name"
+            placeholder="e.g. Tower C or West Wing"
+            required
+            value={towerFormData.name}
+            onChange={(e) => setTowerFormData({ ...towerFormData, name: e.target.value })}
+            error={towerErrors.name}
+          />
+          <Input
+            label="Description / Specifications"
+            placeholder="e.g. 24 Floors, 4 Units per floor"
+            value={towerFormData.description}
+            onChange={(e) => setTowerFormData({ ...towerFormData, description: e.target.value })}
+          />
+
+          {towerErrors.submit && (
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{towerErrors.submit}</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="secondary"
+              size="md"
+              disabled={isSubmitting}
+              onClick={() => setIsAddTowerModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="md"
+              leftIcon={Building2}
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Creating Tower...' : 'Add Tower'}
+            </Button>
+          </div>
+        </form>
       </Modal>
 
       {/* Add Unit to Project Modal */}
@@ -889,6 +1079,7 @@ export function ProjectDetailPage() {
         defaultProjectId={project.id}
         defaultProjectName={project.name}
         towers={project.buildings}
+        onSuccess={fetchProjectDetails}
       />
     </div>
   );
