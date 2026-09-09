@@ -1,5 +1,6 @@
 const express = require('express');
 const leadController = require('../controllers/lead.controller');
+const leadActivityController = require('../controllers/leadActivity.controller');
 const authMiddleware = require('../middlewares/auth.middleware');
 const authorize = require('../middlewares/role.middleware');
 const validationMiddleware = require('../middlewares/validation.middleware');
@@ -9,6 +10,11 @@ const {
   updateLeadSchema,
   updateStageSchema,
 } = require('../validators/lead.validator');
+const {
+  createNoteSchema,
+  createFollowupSchema,
+  updateFollowupStatusSchema,
+} = require('../validators/noteFollowup.validator');
 
 const router = express.Router();
 
@@ -68,5 +74,62 @@ router.patch('/:id/stage', validationMiddleware(updateStageSchema), (req, res, n
 router.delete('/:id', authorize(ROLES.ADMIN), (req, res, next) => {
   return leadController.delete(req, res, next);
 });
+
+// ==========================================
+// LEAD NOTES ENDPOINTS (Phase 9)
+// ==========================================
+
+/**
+ * @route   POST /api/v1/leads/:id/notes
+ * @desc    Add a note to a lead prospect
+ * @access  Private (ADMIN, SALES - scoped)
+ */
+router.post('/:id/notes', validationMiddleware(createNoteSchema), (req, res, next) => {
+  return leadActivityController.addNote(req, res, next);
+});
+
+/**
+ * @route   GET /api/v1/leads/:id/notes
+ * @desc    Get all notes for a lead
+ * @access  Private (ADMIN, SALES - scoped)
+ */
+router.get('/:id/notes', (req, res, next) => {
+  return leadActivityController.getNotes(req, res, next);
+});
+
+// ==========================================
+// LEAD FOLLOW-UPS ENDPOINTS (Phase 9)
+// ==========================================
+
+/**
+ * @route   POST /api/v1/leads/:id/followups
+ * @desc    Schedule a follow-up for a lead
+ * @access  Private (ADMIN, SALES - scoped)
+ */
+router.post('/:id/followups', validationMiddleware(createFollowupSchema), (req, res, next) => {
+  return leadActivityController.addFollowup(req, res, next);
+});
+
+/**
+ * @route   GET /api/v1/leads/:id/followups
+ * @desc    Get all follow-ups for a lead
+ * @access  Private (ADMIN, SALES - scoped)
+ */
+router.get('/:id/followups', (req, res, next) => {
+  return leadActivityController.getFollowups(req, res, next);
+});
+
+/**
+ * @route   PATCH /api/v1/leads/:id/followups/:followupId
+ * @desc    Update status of a follow-up
+ * @access  Private (ADMIN, SALES - scoped)
+ */
+router.patch(
+  '/:id/followups/:followupId',
+  validationMiddleware(updateFollowupStatusSchema),
+  (req, res, next) => {
+    return leadActivityController.updateFollowupStatus(req, res, next);
+  }
+);
 
 module.exports = router;
