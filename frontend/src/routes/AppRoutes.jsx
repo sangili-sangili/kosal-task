@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import AuthLayout from '../layouts/AuthLayout';
 import ProtectedRoute from './ProtectedRoute';
+import PermissionGuard from './PermissionGuard';
 import Loader from '../components/common/Loader';
 
 // Lazy-loaded pages for optimal bundle splitting
@@ -65,13 +66,41 @@ export function AppRoutes() {
           <Route path="/bookings/create" element={<BookingCreatePage />} />
           <Route path="/bookings/:id" element={<BookingDetailPage />} />
 
-          {/* User Management & Security Master */}
-          <Route path="/users" element={<UserManagementPage />} />
-          <Route path="/roles" element={<RoleManagementPage />} />
+          {/* User Management & Security Master (Protected by PermissionGuard) */}
+          <Route
+            path="/users"
+            element={
+              <PermissionGuard requiredPermission="user:read" moduleName="User Management">
+                <UserManagementPage />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="/roles"
+            element={
+              <PermissionGuard requiredPermission="role:read" moduleName="Roles Master">
+                <RoleManagementPage />
+              </PermissionGuard>
+            }
+          />
 
-          {/* Activity & Audit Logs */}
-          <Route path="/audit" element={<AuditLogsPage />} />
-          <Route path="/activity" element={<AuditLogsPage />} />
+          {/* Activity & Audit Logs (Protected by PermissionGuard) */}
+          <Route
+            path="/audit"
+            element={
+              <PermissionGuard requiredPermission="audit:read" moduleName="Activity & Audit Logs">
+                <AuditLogsPage />
+              </PermissionGuard>
+            }
+          />
+          <Route
+            path="/activity"
+            element={
+              <PermissionGuard requiredPermission="audit:read" moduleName="Activity & Audit Logs">
+                <AuditLogsPage />
+              </PermissionGuard>
+            }
+          />
         </Route>
 
         {/* Fallback 404 */}

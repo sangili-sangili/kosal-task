@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { useAuth } from '../../hooks/useAuth';
+import { usePermissions } from '../../hooks/usePermissions';
 import { dashboardService } from '../../services/dashboardService';
 import { auditService } from '../../services/auditService';
 import { LEAD_STAGES, STAGE_CONFIG } from '../../mock/mockData';
@@ -78,6 +79,7 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currentUser } = useCrm();
+  const { canViewAudit, isAdmin } = usePermissions();
   const activeUser = user || currentUser;
 
   const [metrics, setMetrics] = useState(null);
@@ -99,10 +101,14 @@ export function DashboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const [res, auditRes] = await Promise.allSettled([
-        dashboardService.getMetrics(),
-        auditService.getAuditLogs({ limit: 6 }),
-      ]);
+      const fetchCalls = [dashboardService.getMetrics()];
+      if (canViewAudit) {
+        fetchCalls.push(auditService.getAuditLogs({ limit: 6 }));
+      }
+
+      const results = await Promise.allSettled(fetchCalls);
+      const res = results[0];
+      const auditRes = canViewAudit ? results[1] : null;
 
       let metricsData = null;
       if (res.status === 'fulfilled') {
@@ -122,15 +128,19 @@ export function DashboardPage() {
         setError(res.reason?.message || 'Unable to connect to live backend API');
       }
 
-      // Populate Live Activity Stream from live backend audit logs
-      if (metricsData?.recentActivities && Array.isArray(metricsData.recentActivities) && metricsData.recentActivities.length > 0) {
-        setLiveActivities(metricsData.recentActivities);
-      } else if (auditRes.status === 'fulfilled') {
-        const aVal = auditRes.value;
-        const logs = aVal?.logs || aVal?.data || [];
-        if (Array.isArray(logs) && logs.length > 0) {
-          setLiveActivities(logs);
+      // Populate Live Activity Stream only if authorized for audit
+      if (canViewAudit) {
+        if (metricsData?.recentActivities && Array.isArray(metricsData.recentActivities) && metricsData.recentActivities.length > 0) {
+          setLiveActivities(metricsData.recentActivities);
+        } else if (auditRes && auditRes.status === 'fulfilled') {
+          const aVal = auditRes.value;
+          const logs = aVal?.logs || aVal?.data || [];
+          if (Array.isArray(logs) && logs.length > 0) {
+            setLiveActivities(logs);
+          }
         }
+      } else {
+        setLiveActivities([]);
       }
     } catch (err) {
       console.error('Failed to load dashboard metrics', err);
@@ -142,7 +152,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     fetchMetrics();
-  }, [activeUser?.id, activeUser?.role]);
+  }, [activeUser?.id, activeUser?.role, canViewAudit]);
 
   // 1. Dynamic KPI Computations
   const totalLeads = metrics?.leads?.total ?? 0;
@@ -857,9 +867,9 @@ export function DashboardPage() {
       </div>
 
       {/* GRAPH SECTION 2: Visual Lead Funnel & Live Activity Stream (EQUAL HEIGHTS) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-        {/* Left 7 Cols: Lead Conversion Funnel Flow */}
-        <Card className="lg:col-span-7 flex flex-col h-full rounded-2xl border-slate-200/90 shadow-sm hover:shadow-md transition-shadow">
+      <div className={`grid grid-cols-1 ${canViewAudit ? 'lg:grid-cols-12' : 'lg:grid-cols-1'} gap-6 items-stretch`}>
+        {/* Sales Conversion Funnel Flow (7 cols if audit stream is visible, full width if hidden) */}
+        <Card className={`${canViewAudit ? 'lg:col-span-7' : 'w-full'} flex flex-col h-full rounded-2xl border-slate-200/90 shadow-sm hover:shadow-md transition-shadow`}>
           <CardHeader className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div>
               <CardTitle className="text-base font-bold text-slate-900">Sales Conversion Funnel Flow</CardTitle>
@@ -903,97 +913,99 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Right 5 Cols: Live Recent Activity Stream (Matching Height) */}
-        <Card className="lg:col-span-5 flex flex-col h-full rounded-2xl border-slate-200/90 shadow-sm hover:shadow-md transition-shadow">
-          <CardHeader className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div>
-              <div className="flex items-center gap-2">
-                <CardTitle className="text-base font-bold text-slate-900">Live Activity Stream</CardTitle>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+        {/* Right 5 Cols: Live Recent Activity Stream (Only rendered for Admin / users with audit permission) */}
+        {canViewAudit && (
+          <Card className="lg:col-span-5 flex flex-col h-full rounded-2xl border-slate-200/90 shadow-sm hover:shadow-md transition-shadow">
+            <CardHeader className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-base font-bold text-slate-900">Live Activity Stream</CardTitle>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                </div>
+                <CardDescription className="text-xs text-slate-500 mt-0.5">Recent system events & audit records</CardDescription>
               </div>
-              <CardDescription className="text-xs text-slate-500 mt-0.5">Recent system events & audit records</CardDescription>
-            </div>
-            <Link
-              to="/audit"
-              className="text-xs font-bold text-brand-700 hover:text-brand-800 inline-flex items-center gap-1 bg-brand-50 px-2.5 py-1 rounded-lg border border-brand-200"
-            >
-              <span>Audit Logs</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Link>
-          </CardHeader>
-
-          <div className="divide-y divide-slate-100 flex-1 flex flex-col justify-between">
-            <div className="divide-y divide-slate-100">
-              {loading && liveActivities.length === 0 ? (
-                <div className="p-4 space-y-3">
-                  {[1, 2, 3, 4].map((n) => (
-                    <div key={n} className="flex items-start gap-3 p-1.5 animate-pulse">
-                      <div className="w-8 h-8 rounded-xl bg-slate-200 shrink-0" />
-                      <div className="flex-1 space-y-2">
-                        <div className="flex justify-between">
-                          <div className="h-3 bg-slate-200 rounded w-24" />
-                          <div className="h-2.5 bg-slate-100 rounded w-12" />
-                        </div>
-                        <div className="h-3 bg-slate-100 rounded w-5/6" />
-                        <div className="h-2 bg-slate-100 rounded w-1/3" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : liveActivities.length === 0 ? (
-                <div className="p-8 text-center text-slate-400">
-                  <Clock className="w-8 h-8 mx-auto mb-2 text-slate-300 opacity-60" />
-                  <p className="text-xs font-semibold text-slate-600">No Recent Activity Records</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">System events and audit logs will appear here live</p>
-                </div>
-              ) : (
-                liveActivities.slice(0, 4).map((log) => {
-                  const actorName = log.actor?.name || 'CRM System';
-                  const initials = log.actor?.avatar ||
-                    actorName.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase() ||
-                    'SYS';
-                  const logDate = log.timestamp || log.createdAt;
-
-                  return (
-                    <div key={log.id} className="p-3.5 hover:bg-slate-50/80 transition-colors flex items-start gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
-                        {initials}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1 text-xs">
-                          <span className="font-bold text-slate-900 truncate">{actorName}</span>
-                          <span className="text-[10px] text-slate-400 font-mono font-semibold shrink-0">
-                            {formatActivityTime(logDate)}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-600 line-clamp-2 mt-0.5 leading-relaxed font-medium">
-                          {log.summary}
-                        </p>
-                        <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-400">
-                          <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] border ${getActionBadgeClass(log.action)}`}>
-                            {log.action}
-                          </span>
-                          <span>•</span>
-                          <span className="truncate font-medium text-slate-500">{log.entityTitle || log.entityType}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            <div className="p-3 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl text-center">
               <Link
                 to="/audit"
-                className="text-xs font-bold text-brand-700 hover:text-brand-800 inline-flex items-center gap-1"
+                className="text-xs font-bold text-brand-700 hover:text-brand-800 inline-flex items-center gap-1 bg-brand-50 px-2.5 py-1 rounded-lg border border-brand-200"
               >
-                Open Complete Forensic Audit Logs
-                <ChevronRight className="w-3.5 h-3.5" />
+                <span>Audit Logs</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </Link>
+            </CardHeader>
+
+            <div className="divide-y divide-slate-100 flex-1 flex flex-col justify-between">
+              <div className="divide-y divide-slate-100">
+                {loading && liveActivities.length === 0 ? (
+                  <div className="p-4 space-y-3">
+                    {[1, 2, 3, 4].map((n) => (
+                      <div key={n} className="flex items-start gap-3 p-1.5 animate-pulse">
+                        <div className="w-8 h-8 rounded-xl bg-slate-200 shrink-0" />
+                        <div className="flex-1 space-y-2">
+                          <div className="flex justify-between">
+                            <div className="h-3 bg-slate-200 rounded w-24" />
+                            <div className="h-2.5 bg-slate-100 rounded w-12" />
+                          </div>
+                          <div className="h-3 bg-slate-100 rounded w-5/6" />
+                          <div className="h-2 bg-slate-100 rounded w-1/3" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : liveActivities.length === 0 ? (
+                  <div className="p-8 text-center text-slate-400">
+                    <Clock className="w-8 h-8 mx-auto mb-2 text-slate-300 opacity-60" />
+                    <p className="text-xs font-semibold text-slate-600">No Recent Activity Records</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">System events and audit logs will appear here live</p>
+                  </div>
+                ) : (
+                  liveActivities.slice(0, 4).map((log) => {
+                    const actorName = log.actor?.name || 'CRM System';
+                    const initials = log.actor?.avatar ||
+                      actorName.split(' ').map((n) => n[0]).join('').substring(0, 2).toUpperCase() ||
+                      'SYS';
+                    const logDate = log.timestamp || log.createdAt;
+
+                    return (
+                      <div key={log.id} className="p-3.5 hover:bg-slate-50/80 transition-colors flex items-start gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-xs">
+                          {initials}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1 text-xs">
+                            <span className="font-bold text-slate-900 truncate">{actorName}</span>
+                            <span className="text-[10px] text-slate-400 font-mono font-semibold shrink-0">
+                              {formatActivityTime(logDate)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 line-clamp-2 mt-0.5 leading-relaxed font-medium">
+                            {log.summary}
+                          </p>
+                          <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-400">
+                            <span className={`font-bold px-1.5 py-0.5 rounded text-[9px] border ${getActionBadgeClass(log.action)}`}>
+                              {log.action}
+                            </span>
+                            <span>•</span>
+                            <span className="truncate font-medium text-slate-500">{log.entityTitle || log.entityType}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="p-3 border-t border-slate-100 bg-slate-50/60 rounded-b-2xl text-center">
+                <Link
+                  to="/audit"
+                  className="text-xs font-bold text-brand-700 hover:text-brand-800 inline-flex items-center gap-1"
+                >
+                  Open Complete Forensic Audit Logs
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        )}
       </div>
 
       {/* SECTION 3: Actionable Follow-ups & Project Realization (EQUAL HEIGHTS) */}

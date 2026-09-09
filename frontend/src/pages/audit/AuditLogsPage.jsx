@@ -34,6 +34,7 @@ import Table from '../../components/ui/Table';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import { auditService } from '../../services/auditService';
+import { usePermissions } from '../../hooks/usePermissions';
 
 const PAGE_SIZE = 20;
 
@@ -60,6 +61,9 @@ const ENTITY_ICONS = {
 };
 
 export function AuditLogsPage() {
+  const { user } = useAuth();
+  const { canViewAudit } = usePermissions();
+
   const [logs, setLogs] = useState([]);
   const [stats, setStats] = useState({
     totalEvents: 0,
@@ -77,6 +81,7 @@ export function AuditLogsPage() {
   const [actionFilter, setActionFilter] = useState('ALL');
   const [severityFilter, setSeverityFilter] = useState('ALL');
   const [selectedLog, setSelectedLog] = useState(null);
+
   const [toastMessage, setToastMessage] = useState(null);
   const [viewMode, setViewMode] = useState('table'); // 'table' | 'timeline'
   const [currentPage, setCurrentPage] = useState(1);
@@ -88,6 +93,7 @@ export function AuditLogsPage() {
 
   // Fetch audit records from backend API
   const fetchAuditData = useCallback(async (isSilent = false) => {
+    if (!canViewAudit) return;
     if (isSilent) {
       setIsRefreshing(true);
     } else {
@@ -114,11 +120,13 @@ export function AuditLogsPage() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [canViewAudit]);
 
   useEffect(() => {
-    fetchAuditData(false);
-  }, [fetchAuditData]);
+    if (canViewAudit) {
+      fetchAuditData(false);
+    }
+  }, [fetchAuditData, canViewAudit]);
 
   // Filtered Audit Logs
   const filteredLogs = useMemo(() => {

@@ -13,6 +13,7 @@ import {
   UserCircle2,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { usePermissions } from '../../hooks/usePermissions';
 import { leadService } from '../../services/leadService';
 
 const routeTitles = {
@@ -43,6 +44,7 @@ export function Header({ onToggleSidebar }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { canViewAudit } = usePermissions();
 
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -467,15 +469,17 @@ export function Header({ onToggleSidebar }) {
                   </div>
                 </div>
 
-                {/* Menu item: Audit */}
-                <button
-                  type="button"
-                  onClick={() => { setProfileOpen(false); navigate('/audit'); }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors text-left"
-                >
-                  <UserCircle2 className="w-3.5 h-3.5 text-slate-500" />
-                  Activity & Audit
-                </button>
+                {/* Menu item: Audit (Only shown if authorized) */}
+                {canViewAudit && (
+                  <button
+                    type="button"
+                    onClick={() => { setProfileOpen(false); navigate('/audit'); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors text-left"
+                  >
+                    <UserCircle2 className="w-3.5 h-3.5 text-slate-500" />
+                    Activity & Audit
+                  </button>
+                )}
 
                 <div className="my-1 border-t border-slate-100" />
 

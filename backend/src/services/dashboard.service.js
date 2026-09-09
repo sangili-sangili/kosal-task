@@ -1,4 +1,4 @@
-const { sequelize, Lead, Unit, Booking, LeadFollowup, Project, Building, User } = require('../models');
+const { sequelize, Lead, Unit, Booking, LeadFollowup, Project, Building, User, Role } = require('../models');
 const { ROLES } = require('../constants/roles');
 const { LEAD_STAGES } = require('../constants/leadStages');
 const { UNIT_STATUS } = require('../constants/unitStatus');
@@ -228,13 +228,29 @@ class DashboardService {
       status: b.status,
     }));
 
-    // 9. Live Recent Activity Stream (Latest 5 records from MySQL audit_logs)
+    // 9. Live Recent Activity Stream (Only for Admin or roles with 'audit:read' permission)
     let recentActivities = [];
-    try {
-      const auditResult = await auditService.getAuditLogs({ limit: 5 });
-      recentActivities = auditResult.logs || [];
-    } catch (err) {
-      recentActivities = [];
+    const isAdmin = currentUser.role === ROLES.ADMIN || currentUser.role === 'SUPER_ADMIN';
+    let canViewAudit = isAdmin;
+
+    if (!isAdmin && currentUser.role && Role) {
+      try {
+        const roleDoc = await Role.findOne({ where: { code: currentUser.role } });
+        if (roleDoc && Array.isArray(roleDoc.permissions)) {
+          canViewAudit = roleDoc.permissions.includes('audit:read') || roleDoc.permissions.includes('*');
+        }
+      } catch (err) {
+        canViewAudit = false;
+      }
+    }
+
+    if (canViewAudit) {
+      try {
+        const auditResult = await auditService.getAuditLogs({ limit: 5 });
+        recentActivities = auditResult.logs || [];
+      } catch (err) {
+        recentActivities = [];
+      }
     }
 
     return {
