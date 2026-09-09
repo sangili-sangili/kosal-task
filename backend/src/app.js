@@ -14,6 +14,7 @@ const notFoundMiddleware = require('./middlewares/notFound.middleware');
 const rateLimitMiddleware = require('./middlewares/rateLimit.middleware');
 const healthRoutes = require('./routes/health.routes');
 const authRoutes = require('./routes/auth.routes');
+const leadRoutes = require('./routes/lead.routes');
 
 const app = express();
 
@@ -57,6 +58,7 @@ app.use('/api/', rateLimitMiddleware);
 // 6. Base API v1 Routes
 app.use('/api/v1', healthRoutes);
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/leads', leadRoutes);
 
 // Root fallback
 app.get('/', (req, res) => {
