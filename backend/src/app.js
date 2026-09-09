@@ -18,6 +18,7 @@ const leadRoutes = require('./routes/lead.routes');
 const projectRoutes = require('./routes/project.routes');
 const unitRoutes = require('./routes/unit.routes');
 const bookingRoutes = require('./routes/booking.routes');
+const dashboardRoutes = require('./routes/dashboard.routes');
 
 const app = express();
 
@@ -65,6 +66,7 @@ app.use('/api/v1/leads', leadRoutes);
 app.use('/api/v1/projects', projectRoutes);
 app.use('/api/v1/units', unitRoutes);
 app.use('/api/v1/bookings', bookingRoutes);
+app.use('/api/v1/dashboard', dashboardRoutes);
 
 // Root fallback
 app.get('/', (req, res) => {
