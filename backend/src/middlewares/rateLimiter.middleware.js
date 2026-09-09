@@ -4,8 +4,9 @@ const { HTTP_STATUS, ERROR_CODES } = require('../constants/httpStatusCodes');
 
 // Standard API Rate Limiter (e.g. 100 requests per 15 minutes)
 const apiRateLimiter = rateLimit({
-  windowMs: env.RATE_LIMIT.WINDOW_MS,
-  max: env.RATE_LIMIT.MAX,
+  windowMs: env.RATE_LIMIT?.WINDOW_MS || 15 * 60 * 1000,
+  max: env.NODE_ENV === 'development' ? 10000 : (env.RATE_LIMIT?.MAX || 1000),
+  skip: (req) => env.NODE_ENV === 'development' || req.ip === '127.0.0.1' || req.ip === '::1',
   standardHeaders: true,
   legacyHeaders: false,
   message: {

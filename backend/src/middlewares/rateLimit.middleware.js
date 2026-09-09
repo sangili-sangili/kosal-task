@@ -5,8 +5,9 @@ const rateLimit = require('express-rate-limit');
 const env = require('../config/env');
 
 const rateLimitMiddleware = rateLimit({
-  windowMs: env.SECURITY?.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000, // 15 minutes
-  max: env.SECURITY?.RATE_LIMIT_MAX || 100, // Limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: env.NODE_ENV === 'development' ? 10000 : (env.RATE_LIMIT_MAX || 1000),
+  skip: (req) => env.NODE_ENV === 'development' || req.ip === '127.0.0.1' || req.ip === '::1',
   standardHeaders: true,
   legacyHeaders: false,
   message: {
