@@ -66,6 +66,14 @@ function initUnitModel(sequelize) {
           min: { args: [0], msg: 'Price cannot be negative' },
         },
       },
+      facing: {
+        type: DataTypes.STRING(50),
+        allowNull: true,
+        defaultValue: 'East',
+        validate: {
+          len: { args: [0, 50], msg: 'Facing description cannot exceed 50 characters' },
+        },
+      },
       status: {
         type: DataTypes.ENUM(...UNIT_STATUS_VALUES),
         allowNull: false,

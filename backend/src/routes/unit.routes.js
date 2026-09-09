@@ -25,9 +25,9 @@ router.get('/', (req, res, next) => {
 /**
  * @route   POST /api/v1/units
  * @desc    Create a new inventory unit in a building
- * @access  Private (ADMIN only)
+ * @access  Private (ADMIN, SALES)
  */
-router.post('/', authorize(ROLES.ADMIN), validationMiddleware(createUnitSchema), (req, res, next) => {
+router.post('/', authorize(ROLES.ADMIN, ROLES.SALES), validationMiddleware(createUnitSchema), (req, res, next) => {
   return propertyController.createUnit(req, res, next);
 });
 
@@ -43,18 +43,18 @@ router.get('/:id', (req, res, next) => {
 /**
  * @route   PATCH /api/v1/units/:id
  * @desc    Update unit details
- * @access  Private (ADMIN only)
+ * @access  Private (ADMIN, SALES)
  */
-router.patch('/:id', authorize(ROLES.ADMIN), validationMiddleware(updateUnitSchema), (req, res, next) => {
+router.patch('/:id', authorize(ROLES.ADMIN, ROLES.SALES), validationMiddleware(updateUnitSchema), (req, res, next) => {
   return propertyController.updateUnit(req, res, next);
 });
 
 /**
  * @route   DELETE /api/v1/units/:id
  * @desc    Soft-delete unit
- * @access  Private (ADMIN only)
+ * @access  Private (ADMIN, SALES)
  */
-router.delete('/:id', authorize(ROLES.ADMIN), (req, res, next) => {
+router.delete('/:id', authorize(ROLES.ADMIN, ROLES.SALES), (req, res, next) => {
   return propertyController.deleteUnit(req, res, next);
 });
 

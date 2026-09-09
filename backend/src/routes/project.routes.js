@@ -26,9 +26,9 @@ router.get('/', (req, res, next) => {
 /**
  * @route   POST /api/v1/projects
  * @desc    Create a new project
- * @access  Private (ADMIN only)
+ * @access  Private (ADMIN, SALES)
  */
-router.post('/', authorize(ROLES.ADMIN), validationMiddleware(createProjectSchema), (req, res, next) => {
+router.post('/', authorize(ROLES.ADMIN, ROLES.SALES), validationMiddleware(createProjectSchema), (req, res, next) => {
   return propertyController.createProject(req, res, next);
 });
 
@@ -44,18 +44,18 @@ router.get('/:id', (req, res, next) => {
 /**
  * @route   PATCH /api/v1/projects/:id
  * @desc    Update project
- * @access  Private (ADMIN only)
+ * @access  Private (ADMIN, SALES)
  */
-router.patch('/:id', authorize(ROLES.ADMIN), validationMiddleware(updateProjectSchema), (req, res, next) => {
+router.patch('/:id', authorize(ROLES.ADMIN, ROLES.SALES), validationMiddleware(updateProjectSchema), (req, res, next) => {
   return propertyController.updateProject(req, res, next);
 });
 
 /**
  * @route   DELETE /api/v1/projects/:id
  * @desc    Soft-delete project
- * @access  Private (ADMIN only)
+ * @access  Private (ADMIN, SALES)
  */
-router.delete('/:id', authorize(ROLES.ADMIN), (req, res, next) => {
+router.delete('/:id', authorize(ROLES.ADMIN, ROLES.SALES), (req, res, next) => {
   return propertyController.deleteProject(req, res, next);
 });
 
@@ -72,11 +72,11 @@ router.get('/:projectId/buildings', (req, res, next) => {
 /**
  * @route   POST /api/v1/projects/:projectId/buildings
  * @desc    Add a building to a project
- * @access  Private (ADMIN only)
+ * @access  Private (ADMIN, SALES)
  */
 router.post(
   '/:projectId/buildings',
-  authorize(ROLES.ADMIN),
+  authorize(ROLES.ADMIN, ROLES.SALES),
   (req, res, next) => {
     return propertyController.createBuilding(req, res, next);
   }

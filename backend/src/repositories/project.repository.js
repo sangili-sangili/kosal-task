@@ -22,7 +22,7 @@ class ProjectRepository extends BaseRepository {
             {
               model: Unit,
               as: 'units',
-              attributes: ['id', 'status', 'price', 'unit_type', 'unit_number'],
+              attributes: ['id', 'status', 'price', 'unit_type', 'unit_number', 'facing'],
             },
           ],
         },

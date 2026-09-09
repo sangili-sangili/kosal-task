@@ -97,29 +97,16 @@ const updateBuildingSchema = {
 
 const createUnitSchema = {
   body: z.object({
-    building_id: z
-      .number({ required_error: 'Building ID is required' })
-      .int()
-      .positive(),
-    unit_number: z
-      .string({ required_error: 'Unit number is required (e.g. 101, A-302)' })
-      .trim()
-      .min(1, 'Unit number is required')
-      .max(50),
-    unit_type: z
-      .string({ required_error: 'Unit type is required (e.g. 1BHK, 2BHK, 3BHK)' })
-      .trim()
-      .min(1, 'Unit type is required')
-      .max(50),
-    floor: z
-      .number({ required_error: 'Floor number is required' })
-      .int(),
-    area: z
-      .number({ required_error: 'Area in sq.ft is required' })
-      .positive('Area must be greater than 0'),
-    price: z
-      .number({ required_error: 'Price is required' })
-      .nonnegative('Price cannot be negative'),
+    building_id: z.number().int().positive().optional(),
+    buildingId: z.number().int().positive().optional(),
+    unit_number: z.string().trim().min(1).max(50).optional(),
+    unitNumber: z.string().trim().min(1).max(50).optional(),
+    unit_type: z.string().trim().min(1).max(50).optional(),
+    unitType: z.string().trim().min(1).max(50).optional(),
+    floor: z.coerce.number().int({ message: 'Floor must be an integer' }),
+    area: z.coerce.number().positive('Area must be greater than 0'),
+    price: z.coerce.number().nonnegative('Price cannot be negative'),
+    facing: z.string().trim().max(50).optional().nullable(),
     status: z
       .enum(UNIT_STATUS_VALUES, {
         errorMap: () => ({ message: `Status must be one of: ${UNIT_STATUS_VALUES.join(', ')}` }),
@@ -132,10 +119,13 @@ const createUnitSchema = {
 const updateUnitSchema = {
   body: z.object({
     unit_number: z.string().trim().min(1).max(50).optional(),
+    unitNumber: z.string().trim().min(1).max(50).optional(),
     unit_type: z.string().trim().min(1).max(50).optional(),
-    floor: z.number().int().optional(),
-    area: z.number().positive().optional(),
-    price: z.number().nonnegative().optional(),
+    unitType: z.string().trim().min(1).max(50).optional(),
+    floor: z.coerce.number().int().optional(),
+    area: z.coerce.number().positive().optional(),
+    price: z.coerce.number().nonnegative().optional(),
+    facing: z.string().trim().max(50).optional().nullable(),
     status: z.enum(UNIT_STATUS_VALUES).optional(),
   }),
 };

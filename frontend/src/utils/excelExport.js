@@ -128,4 +128,56 @@ export function exportProjectsToExcel(projects = []) {
   exportToExcel(`RealEstate_CRM_Projects_${timestamp}`, headers, rows);
 }
 
+/**
+ * Specifically format and export Unit Inventory data to Excel (.csv)
+ * @param {Array} units
+ */
+export function exportUnitsToExcel(units = []) {
+  const headers = [
+    'Unit ID',
+    'Unit Number',
+    'Project Name',
+    'Tower / Building',
+    'Typology / Config',
+    'Floor Level',
+    'Super Area (sq ft)',
+    'Estimated Carpet Area (sq ft)',
+    'Facing Direction',
+    'Price (INR)',
+    'Price Display',
+    'Availability Status',
+    'Created Date',
+  ];
+
+  const rows = units.map((u) => {
+    const projName = u.building?.project?.name || u.projectName || 'Residential Development';
+    const bldName = u.building?.name || u.buildingName || 'Tower Block';
+    const priceNum = Number(u.price) || 0;
+    const priceDisplay = priceNum > 0 ? (priceNum >= 10000000 ? `₹${(priceNum / 10000000).toFixed(2)} Cr` : `₹${(priceNum / 100000).toFixed(2)} L`) : 'N/A';
+    const area = Number(u.area) || 0;
+    const carpet = area > 0 ? Math.round(area * 0.76) : '';
+
+    return [
+      u.id || '',
+      u.unit_number || u.unitNumber || '',
+      projName,
+      bldName,
+      u.unit_type || u.type || '',
+      u.floor !== undefined ? `${u.floor}th Floor` : '',
+      area,
+      carpet,
+      u.facing || 'East',
+      priceNum,
+      priceDisplay,
+      u.status || 'AVAILABLE',
+      u.created_at || u.createdAt
+        ? new Date(u.created_at || u.createdAt).toLocaleDateString('en-IN')
+        : '',
+    ];
+  });
+
+  const timestamp = new Date().toISOString().split('T')[0];
+  exportToExcel(`RealEstate_CRM_Unit_Inventory_${timestamp}`, headers, rows);
+}
+
 export default exportLeadsToExcel;
