@@ -24,22 +24,31 @@ function initSequelize() {
       define: {
         timestamps: true,
         underscored: true,
-        paranoid: true, // Enable soft deletes by default
+        paranoid: true, // Soft delete enabled by default
+      },
+      dialectOptions: {
+        connectTimeout: 10000,
       },
     });
   } else {
-    // Development or SQLite fallback
+    // Resilient SQLite configuration for development & automated tests
     const dbDir = path.resolve(__dirname, '../../database');
     if (!fs.existsSync(dbDir)) {
       fs.mkdirSync(dbDir, { recursive: true });
     }
-    const storagePath = path.join(dbDir, 'dev.sqlite');
+    const storagePath = path.join(dbDir, 'real_estate_crm.sqlite');
 
-    logger.info(`Using SQLite database at ${storagePath} for local development/testing.`);
+    logger.info(`Configured SQLite database pool at: ${storagePath} [Development/Testing Mode]`);
     sequelize = new Sequelize({
       dialect: 'sqlite',
       storage: storagePath,
       logging: (msg) => logger.debug(msg),
+      pool: {
+        max: env.DB.POOL.MAX,
+        min: env.DB.POOL.MIN,
+        idle: env.DB.POOL.IDLE,
+        acquire: env.DB.POOL.ACQUIRE,
+      },
       define: {
         timestamps: true,
         underscored: true,
@@ -59,10 +68,10 @@ async function testConnection() {
     logger.info(`Database connection established successfully. [Dialect: ${sequelize.getDialect()}]`);
     return true;
   } catch (error) {
-    logger.error('Unable to connect to the database:', error);
-    // If MySQL failed and fallback wasn't already triggered, attempt fallback
+    logger.error(`Unable to connect to the database (${sequelize.getDialect()}): ${error.message}`);
+    // If MySQL connection failed and fallback was not active, trigger SQLite fallback automatically
     if (env.DB.DIALECT === 'mysql' && !env.DB.USE_SQLITE_FALLBACK) {
-      logger.warn('Attempting SQLite fallback for local development...');
+      logger.warn('Attempting SQLite fallback for local development resilience...');
       env.DB.USE_SQLITE_FALLBACK = true;
       sequelize = initSequelize();
       await sequelize.authenticate();
@@ -75,10 +84,12 @@ async function testConnection() {
 
 async function closeConnection() {
   try {
-    await sequelize.close();
-    logger.info('Database connection closed cleanly.');
+    if (sequelize) {
+      await sequelize.close();
+      logger.info('Sequelize database connection pool closed cleanly.');
+    }
   } catch (error) {
-    logger.error('Error closing database connection:', error);
+    logger.error('Error while closing database connection pool:', error);
   }
 }
 

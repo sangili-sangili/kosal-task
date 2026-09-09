@@ -1,95 +1,142 @@
 const { sequelize } = require('../config/database');
 const { initUserModel } = require('./User');
-const { initRoleModel } = require('./Role');
-const { initPermissionModel } = require('./Permission');
-const { initUserRoleModel } = require('./UserRole');
-const { initRolePermissionModel } = require('./RolePermission');
-const { initRefreshTokenModel } = require('./RefreshToken');
-const { initCustomerModel } = require('./Customer');
-const { initAccountModel } = require('./Account');
-const { initAuditLogModel } = require('./AuditLog');
+const { initProjectModel } = require('./Project');
+const { initBuildingModel } = require('./Building');
+const { initUnitModel } = require('./Unit');
+const { initLeadModel } = require('./Lead');
+const { initLeadNoteModel } = require('./LeadNote');
+const { initLeadFollowupModel } = require('./LeadFollowup');
+const { initBookingModel } = require('./Booking');
 
-// Initialize models
+// 1. Initialize Models with Database Connection
 const User = initUserModel(sequelize);
-const Role = initRoleModel(sequelize);
-const Permission = initPermissionModel(sequelize);
-const UserRole = initUserRoleModel(sequelize);
-const RolePermission = initRolePermissionModel(sequelize);
-const RefreshToken = initRefreshTokenModel(sequelize);
-const Customer = initCustomerModel(sequelize);
-const Account = initAccountModel(sequelize);
-const AuditLog = initAuditLogModel(sequelize);
+const Project = initProjectModel(sequelize);
+const Building = initBuildingModel(sequelize);
+const Unit = initUnitModel(sequelize);
+const Lead = initLeadModel(sequelize);
+const LeadNote = initLeadNoteModel(sequelize);
+const LeadFollowup = initLeadFollowupModel(sequelize);
+const Booking = initBookingModel(sequelize);
 
-// Define Associations
-// User <-> Role (Many-to-Many)
-User.belongsToMany(Role, {
-  through: UserRole,
-  foreignKey: 'userId',
-  otherKey: 'roleId',
-  as: 'roles',
-});
-Role.belongsToMany(User, {
-  through: UserRole,
-  foreignKey: 'roleId',
-  otherKey: 'userId',
-  as: 'users',
-});
+// 2. Define Associations
 
-// Role <-> Permission (Many-to-Many)
-Role.belongsToMany(Permission, {
-  through: RolePermission,
-  foreignKey: 'roleId',
-  otherKey: 'permissionId',
-  as: 'permissions',
-});
-Permission.belongsToMany(Role, {
-  through: RolePermission,
-  foreignKey: 'permissionId',
-  otherKey: 'roleId',
-  as: 'roles',
-});
-
-// User -> RefreshTokens (One-to-Many)
-User.hasMany(RefreshToken, {
-  foreignKey: 'userId',
-  as: 'refreshTokens',
+// A. Project <-> Building (1-to-Many)
+Project.hasMany(Building, {
+  foreignKey: 'project_id',
+  as: 'buildings',
   onDelete: 'CASCADE',
 });
-RefreshToken.belongsTo(User, {
-  foreignKey: 'userId',
-  as: 'user',
+Building.belongsTo(Project, {
+  foreignKey: 'project_id',
+  as: 'project',
 });
 
-// Customer -> Accounts (One-to-Many)
-Customer.hasMany(Account, {
-  foreignKey: 'customerId',
-  as: 'accounts',
+// B. Building <-> Unit (1-to-Many)
+Building.hasMany(Unit, {
+  foreignKey: 'building_id',
+  as: 'units',
   onDelete: 'CASCADE',
 });
-Account.belongsTo(Customer, {
-  foreignKey: 'customerId',
-  as: 'customer',
+Unit.belongsTo(Building, {
+  foreignKey: 'building_id',
+  as: 'building',
 });
 
-// User -> AuditLogs (One-to-Many)
-User.hasMany(AuditLog, {
-  foreignKey: 'userId',
-  as: 'auditLogs',
+// C. Lead <-> LeadNote (1-to-Many)
+Lead.hasMany(LeadNote, {
+  foreignKey: 'lead_id',
+  as: 'notes',
+  onDelete: 'CASCADE',
 });
-AuditLog.belongsTo(User, {
-  foreignKey: 'userId',
+LeadNote.belongsTo(Lead, {
+  foreignKey: 'lead_id',
+  as: 'lead',
+});
+
+LeadNote.belongsTo(User, {
+  foreignKey: 'user_id',
   as: 'user',
+});
+User.hasMany(LeadNote, {
+  foreignKey: 'user_id',
+  as: 'notes',
+});
+
+// D. Lead <-> LeadFollowup (1-to-Many)
+Lead.hasMany(LeadFollowup, {
+  foreignKey: 'lead_id',
+  as: 'followups',
+  onDelete: 'CASCADE',
+});
+LeadFollowup.belongsTo(Lead, {
+  foreignKey: 'lead_id',
+  as: 'lead',
+});
+
+LeadFollowup.belongsTo(User, {
+  foreignKey: 'assigned_to',
+  as: 'assignedSalesEmployee',
+});
+User.hasMany(LeadFollowup, {
+  foreignKey: 'assigned_to',
+  as: 'followups',
+});
+
+// E. Lead <-> User (assignedSalesEmployee & createdBy)
+Lead.belongsTo(User, {
+  foreignKey: 'assigned_to',
+  as: 'assignedSalesEmployee',
+});
+User.hasMany(Lead, {
+  foreignKey: 'assigned_to',
+  as: 'assignedLeads',
+});
+
+Lead.belongsTo(User, {
+  foreignKey: 'created_by',
+  as: 'createdBy',
+});
+User.hasMany(Lead, {
+  foreignKey: 'created_by',
+  as: 'createdLeads',
+});
+
+// F. Booking Relationships
+Booking.belongsTo(Lead, {
+  foreignKey: 'lead_id',
+  as: 'lead',
+});
+Lead.hasMany(Booking, {
+  foreignKey: 'lead_id',
+  as: 'bookings',
+});
+
+Booking.belongsTo(Unit, {
+  foreignKey: 'unit_id',
+  as: 'unit',
+});
+Unit.hasMany(Booking, {
+  foreignKey: 'unit_id',
+  as: 'bookings',
+});
+
+Booking.belongsTo(User, {
+  foreignKey: 'booked_by',
+  as: 'bookedBy',
+});
+User.hasMany(Booking, {
+  foreignKey: 'booked_by',
+  as: 'bookings',
 });
 
 module.exports = {
   sequelize,
   User,
-  Role,
-  Permission,
-  UserRole,
-  RolePermission,
-  RefreshToken,
-  Customer,
-  Account,
-  AuditLog,
+  Project,
+  Building,
+  Unit,
+  Lead,
+  LeadNote,
+  LeadFollowup,
+  Booking,
 };

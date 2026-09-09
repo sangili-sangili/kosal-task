@@ -1,45 +1,35 @@
+/**
+ * Health Check Routes
+ */
 const express = require('express');
+const { sendSuccess } = require('../utils/response');
 const { testConnection } = require('../config/database');
-const redisClient = require('../config/redis');
 
 const router = express.Router();
 
-router.get('/healthz', (req, res) => {
-  res.status(200).json({
-    status: 'UP',
-    timestamp: new Date(),
-    uptime: process.uptime(),
-  });
-});
-
-router.get('/readyz', async (req, res) => {
-  let dbStatus = 'DOWN';
-  let redisStatus = 'DOWN';
-
+/**
+ * @route   GET /api/v1/health
+ * @desc    API Health Status probe
+ * @access  Public
+ */
+router.get('/health', async (req, res, next) => {
   try {
-    await testConnection();
-    dbStatus = 'UP';
-  } catch (e) {
-    dbStatus = 'DOWN';
-  }
+    let dbStatus = 'UP';
+    try {
+      await testConnection();
+    } catch (dbErr) {
+      dbStatus = 'DOWN';
+    }
 
-  try {
-    const ping = await redisClient.ping();
-    if (ping === 'PONG') redisStatus = 'UP';
-  } catch (e) {
-    redisStatus = 'DOWN';
-  }
-
-  const isReady = dbStatus === 'UP';
-
-  res.status(isReady ? 200 : 503).json({
-    status: isReady ? 'READY' : 'DEGRADED',
-    services: {
+    return sendSuccess(res, 'API is healthy', {
+      status: 'UP',
       database: dbStatus,
-      redis: redisStatus,
-    },
-    timestamp: new Date(),
-  });
+      uptime: `${Math.floor(process.uptime())}s`,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 module.exports = router;

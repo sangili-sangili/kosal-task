@@ -1,37 +1,28 @@
+/**
+ * Application HTTP Server Entry Point
+ * Handles lifecycle events and graceful shutdown
+ */
 const http = require('http');
 const app = require('./app');
 const env = require('./config/env');
 const logger = require('./config/logger');
 const { testConnection, closeConnection } = require('./config/database');
-const { initializeDatabase } = require('./database/initDb');
-const redisClient = require('./config/redis');
-const { initNotificationWorker } = require('./jobs/workers/notificationWorker');
 
 const server = http.createServer(app);
-
-let worker = null;
 
 async function bootstrap() {
   try {
     logger.info('====================================================');
-    logger.info('   Bootstrapping Enterprise Application Server...   ');
+    logger.info('   Real Estate CRM API Server Initializing...       ');
     logger.info('====================================================');
 
-    // 1. Authenticate Database
+    // Verify Database Connection
     await testConnection();
 
-    // 2. Initialize Database Schema & Seeds
-    await initializeDatabase();
-
-    // 3. Initialize BullMQ Queue Worker
-    worker = initNotificationWorker();
-
-    // 4. Start HTTP Server
+    // Start Listening
     server.listen(env.PORT, () => {
-      logger.info(`Server successfully listening on port ${env.PORT} [Environment: ${env.NODE_ENV}]`);
-      logger.info(`Swagger API documentation available at: ${env.APP_URL}/api/docs`);
-      logger.info(`Health check probe available at: ${env.APP_URL}/healthz`);
-      logger.info(`Ready check probe available at: ${env.APP_URL}/readyz`);
+      logger.info(`Server successfully running on port ${env.PORT} [Env: ${env.NODE_ENV}]`);
+      logger.info(`Health check probe: http://localhost:${env.PORT}/api/v1/health`);
     });
   } catch (error) {
     logger.error('Fatal initialization error during server bootstrap:', error);
@@ -39,7 +30,7 @@ async function bootstrap() {
   }
 }
 
-// Graceful Shutdown Handler (Topic 27)
+// Graceful Shutdown Handler
 let isShuttingDown = false;
 
 async function handleShutdown(signal) {
@@ -48,28 +39,16 @@ async function handleShutdown(signal) {
 
   logger.warn(`Received ${signal}. Initiating graceful application shutdown...`);
 
-  // Stop accepting new HTTP requests
+  // Stop accepting new connections
   server.close(async () => {
-    logger.info('HTTP server closed. No longer accepting new connections.');
+    logger.info('HTTP server closed. Terminating open resources...');
 
     try {
-      // Close worker
-      if (worker) {
-        logger.info('Closing BullMQ worker...');
-        await worker.close();
-      }
-
-      // Close Redis connection
-      if (redisClient && typeof redisClient.quit === 'function') {
-        logger.info('Disconnecting Redis client...');
-        await redisClient.quit();
-      }
-
-      // Close Database pool
-      logger.info('Closing Sequelize database connection pool...');
+      // Close Sequelize Database Pool
+      logger.info('Closing database connection pool...');
       await closeConnection();
 
-      logger.info('Graceful shutdown completed successfully. Exiting process.');
+      logger.info('Graceful shutdown completed. Process exiting.');
       process.exit(0);
     } catch (err) {
       logger.error('Error during graceful shutdown cleanup:', err);
@@ -77,7 +56,7 @@ async function handleShutdown(signal) {
     }
   });
 
-  // Force termination if graceful cleanup hangs beyond 10 seconds
+  // Force termination if cleanup hangs beyond 10 seconds
   setTimeout(() => {
     logger.error('Graceful shutdown timed out (10s). Forcing termination.');
     process.exit(1);
@@ -96,4 +75,12 @@ process.on('uncaughtException', (error) => {
   handleShutdown('UNCAUGHT_EXCEPTION');
 });
 
-bootstrap();
+// Run server only when executed directly (not when required in tests)
+if (require.main === module) {
+  bootstrap();
+}
+
+module.exports = {
+  server,
+  bootstrap,
+};
