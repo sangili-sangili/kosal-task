@@ -180,4 +180,66 @@ export function exportUnitsToExcel(units = []) {
   exportToExcel(`RealEstate_CRM_Unit_Inventory_${timestamp}`, headers, rows);
 }
 
+/**
+ * Specifically format and export Bookings data to Excel (.csv)
+ * @param {Array} bookings
+ */
+export function exportBookingsToExcel(bookings = []) {
+  const headers = [
+    'Booking Reference',
+    'Booking Date',
+    'Customer Name',
+    'Customer Phone',
+    'Customer Email',
+    'Project Name',
+    'Tower / Building',
+    'Unit Number',
+    'Typology / Config',
+    'Floor Level',
+    'Token Deposit (INR)',
+    'Total Price (INR)',
+    'Booking Status',
+    'Payment Status',
+    'Booked By (Agent)',
+    'Agent Email',
+    'Cancellation Reason',
+  ];
+
+  const rows = bookings.map((b) => {
+    const lead = b.lead || {};
+    const unit = b.unit || {};
+    const building = unit.building || {};
+    const project = building.project || {};
+    const agent = b.bookedBy || {};
+
+    const tokenAmount = Number(b.amount || b.bookingAmount) || 0;
+    const totalPrice = Number(unit.price || b.totalPrice) || tokenAmount;
+
+    return [
+      b.booking_reference || b.id || '',
+      b.booking_date || b.bookedDate
+        ? new Date(b.booking_date || b.bookedDate).toLocaleDateString('en-IN')
+        : '',
+      lead.name || b.customerName || 'N/A',
+      lead.phone || b.customerPhone || 'N/A',
+      lead.email || b.customerEmail || '',
+      project.name || b.projectName || 'Residential',
+      building.name || b.buildingName || '',
+      unit.unit_number || b.unitNumber || '',
+      unit.unit_type || b.unitType || '',
+      unit.floor !== undefined ? `${unit.floor}th Floor` : '',
+      tokenAmount,
+      totalPrice,
+      b.status || 'CONFIRMED',
+      b.payment_status || b.paymentStatus || 'TOKEN_RECEIVED',
+      agent.name || b.bookedBy || 'Direct',
+      agent.email || '',
+      b.cancellation_reason || b.cancelReason || '',
+    ];
+  });
+
+  const timestamp = new Date().toISOString().split('T')[0];
+  exportToExcel(`RealEstate_CRM_Bookings_${timestamp}`, headers, rows);
+}
+
 export default exportLeadsToExcel;

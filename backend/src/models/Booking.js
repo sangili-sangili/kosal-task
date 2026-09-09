@@ -98,6 +98,15 @@ function initBookingModel(sequelize) {
           },
         },
       },
+      payment_status: {
+        type: DataTypes.STRING(50),
+        allowNull: false,
+        defaultValue: 'TOKEN_RECEIVED',
+      },
+      cancellation_reason: {
+        type: DataTypes.STRING(255),
+        allowNull: true,
+      },
     },
     {
       sequelize,

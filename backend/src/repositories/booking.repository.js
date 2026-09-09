@@ -64,7 +64,15 @@ class BookingRepository extends BaseRepository {
    * @param {Object} queryOptions
    * @returns {Promise<{ rows: Array<Booking>, count: number }>}
    */
-  async findAndCountAllFiltered({ where = {}, limit = 20, offset = 0, order = [['created_at', 'DESC']] } = {}) {
+  async findAndCountAllFiltered({
+    where = {},
+    projectWhere = {},
+    leadWhere = {},
+    unitWhere = {},
+    limit = 20,
+    offset = 0,
+    order = [['created_at', 'DESC']],
+  } = {}) {
     return this.model.findAndCountAll({
       where,
       limit,
@@ -75,6 +83,7 @@ class BookingRepository extends BaseRepository {
         {
           model: Unit,
           as: 'unit',
+          where: Object.keys(unitWhere).length > 0 ? unitWhere : undefined,
           include: [
             {
               model: Building,
@@ -83,6 +92,7 @@ class BookingRepository extends BaseRepository {
                 {
                   model: Project,
                   as: 'project',
+                  where: Object.keys(projectWhere).length > 0 ? projectWhere : undefined,
                   attributes: ['id', 'name', 'location'],
                 },
               ],
@@ -92,6 +102,7 @@ class BookingRepository extends BaseRepository {
         {
           model: Lead,
           as: 'lead',
+          where: Object.keys(leadWhere).length > 0 ? leadWhere : undefined,
           attributes: ['id', 'name', 'phone', 'email'],
         },
         {

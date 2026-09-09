@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   Check,
@@ -13,29 +13,39 @@ import {
   ShieldCheck,
   DollarSign,
   FileCheck,
+  Phone,
+  Mail,
+  AlertTriangle,
+  Sparkles,
 } from 'lucide-react';
-import { useCrm } from '../../context/CrmContext';
-import { UNIT_STATUS } from '../../mock/mockData';
+import { leadService } from '../../services/leadService';
+import { propertyService } from '../../services/propertyService';
+import { bookingService } from '../../services/bookingService';
 import { formatINR, formatINRCompact } from '../../utils/crmFormatters';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
-import Select from '../../components/ui/Select';
 import Modal from '../../components/ui/Modal';
 import Badge from '../../components/ui/Badge';
 
 export function BookingCreatePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { leads, projects, units, createBooking, currentUser } = useCrm();
 
   const preselectedLeadId = searchParams.get('leadId') || '';
   const preselectedUnitId = searchParams.get('unitId') || '';
 
-  // Stepper State (1, 2, 3, 4)
+  // Stepper State (1: Lead, 2: Property, 3: Unit, 4: Confirm)
   const [currentStep, setCurrentStep] = useState(preselectedLeadId && preselectedUnitId ? 4 : 1);
 
-  // Form State across steps
+  // Live Data State
+  const [leads, setLeads] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [units, setUnits] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
+
+  // Selection States
   const [selectedLeadId, setSelectedLeadId] = useState(preselectedLeadId);
   const [leadSearchQuery, setLeadSearchQuery] = useState('');
 
@@ -43,102 +53,197 @@ export function BookingCreatePage() {
   const [selectedBuildingId, setSelectedBuildingId] = useState('');
 
   const [selectedUnitId, setSelectedUnitId] = useState(preselectedUnitId);
-  const [bookingAmount, setBookingAmount] = useState(500000);
+  const [bookingAmount, setBookingAmount] = useState('500000');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
 
   // Confirmation Modal & Success State
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [confirmedBookingResult, setConfirmedBookingResult] = useState(null);
 
-  // Prepopulate project and building if unitId provided
+  // Load live Leads, Projects & Available Units
   useEffect(() => {
-    if (preselectedUnitId) {
-      const u = units.find((item) => item.id === preselectedUnitId);
-      if (u) {
-        setSelectedProjectId(u.projectId);
-        setSelectedBuildingId(u.buildingId);
-        setSelectedUnitId(u.id);
+    const loadInitialData = async () => {
+      setIsLoading(true);
+      setFetchError(null);
+      try {
+        const [leadsRes, projectsRes, unitsRes] = await Promise.all([
+          leadService.getLeads({ limit: 100 }),
+          propertyService.getProjects(),
+          propertyService.getUnits({ status: 'AVAILABLE', limit: 200 }),
+        ]);
+
+        const leadList = leadsRes?.leads || (Array.isArray(leadsRes) ? leadsRes : []);
+        const projectList = Array.isArray(projectsRes) ? projectsRes : projectsRes?.projects || [];
+        const unitList = unitsRes?.units || (Array.isArray(unitsRes) ? unitsRes : []);
+
+        setLeads(leadList);
+        setProjects(projectList);
+        setUnits(unitList);
+
+        // If preselected unit provided, auto-link project and building
+        if (preselectedUnitId) {
+          const targetUnit = unitList.find((u) => String(u.id) === String(preselectedUnitId));
+          if (targetUnit) {
+            const pId = targetUnit.building?.project?.id || targetUnit.building?.project_id || targetUnit.projectId;
+            const bId = targetUnit.building?.id || targetUnit.building_id || targetUnit.buildingId;
+            if (pId) setSelectedProjectId(String(pId));
+            if (bId) setSelectedBuildingId(String(bId));
+            setSelectedUnitId(String(targetUnit.id));
+            if (targetUnit.price) {
+              setBookingAmount(String(Math.round(Number(targetUnit.price) * 0.1)));
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load booking workflow dependencies:', err);
+        setFetchError(err.message || 'Failed to load booking workflow options');
+      } finally {
+        setIsLoading(false);
       }
-    }
-  }, [preselectedUnitId, units]);
+    };
+
+    loadInitialData();
+  }, [preselectedUnitId]);
 
   // Derived selections
-  const selectedLead = leads.find((l) => l.id === selectedLeadId);
-  const selectedProject = projects.find((p) => p.id === selectedProjectId);
-  const selectedUnit = units.find((u) => u.id === selectedUnitId);
+  const selectedLead = useMemo(() => {
+    return leads.find((l) => String(l.id) === String(selectedLeadId));
+  }, [leads, selectedLeadId]);
 
-  // Available units for selected project & building
-  const availableUnits = units.filter(
-    (u) =>
-      u.status === UNIT_STATUS.AVAILABLE &&
-      (!selectedProjectId || u.projectId === selectedProjectId) &&
-      (!selectedBuildingId || u.buildingId === selectedBuildingId)
-  );
+  const selectedProject = useMemo(() => {
+    return projects.find((p) => String(p.id) === String(selectedProjectId));
+  }, [projects, selectedProjectId]);
+
+  const availableBuildings = useMemo(() => {
+    return selectedProject?.buildings || [];
+  }, [selectedProject]);
+
+  const selectedBuilding = useMemo(() => {
+    return availableBuildings.find((b) => String(b.id) === String(selectedBuildingId));
+  }, [availableBuildings, selectedBuildingId]);
+
+  // Available units filtered for selected project and building
+  const filteredUnits = useMemo(() => {
+    return units.filter((u) => {
+      if (u.status !== 'AVAILABLE') return false;
+      const uBldId = u.building?.id || u.building_id || u.buildingId;
+      const uProjId = u.building?.project?.id || u.building?.project_id || u.projectId;
+
+      if (selectedBuildingId && String(uBldId) !== String(selectedBuildingId)) return false;
+      if (selectedProjectId && String(uProjId) !== String(selectedProjectId)) return false;
+      return true;
+    });
+  }, [units, selectedProjectId, selectedBuildingId]);
+
+  const selectedUnit = useMemo(() => {
+    return units.find((u) => String(u.id) === String(selectedUnitId));
+  }, [units, selectedUnitId]);
+
+  // Update default token when unit changes
+  useEffect(() => {
+    if (selectedUnit && selectedUnit.price) {
+      setBookingAmount(String(Math.round(Number(selectedUnit.price) * 0.1)));
+    }
+  }, [selectedUnit]);
 
   // Filter leads for Step 1
-  const filteredLeads = leads.filter((l) => {
-    if (!leadSearchQuery) return true;
+  const filteredLeads = useMemo(() => {
+    if (!leadSearchQuery.trim()) return leads;
     const q = leadSearchQuery.toLowerCase();
-    return l.name.toLowerCase().includes(q) || l.phone.includes(q) || l.email.toLowerCase().includes(q);
-  });
+    return leads.filter(
+      (l) =>
+        (l.name && l.name.toLowerCase().includes(q)) ||
+        (l.phone && l.phone.includes(q)) ||
+        (l.email && l.email.toLowerCase().includes(q))
+    );
+  }, [leads, leadSearchQuery]);
 
-  const handleConfirmSubmit = () => {
+  // Submit Booking to Live Backend
+  const handleConfirmSubmit = async () => {
+    if (!selectedLeadId || !selectedUnitId) return;
+    setIsSubmitting(true);
+    setSubmitError(null);
+
     try {
-      const newBooking = createBooking({
-        leadId: selectedLeadId,
-        unitId: selectedUnitId,
-        bookingAmount,
-      });
-      setConfirmedBookingResult(newBooking);
+      const payload = {
+        lead_id: parseInt(selectedLeadId, 10),
+        unit_id: parseInt(selectedUnitId, 10),
+        amount: parseFloat(bookingAmount) || 500000,
+        booking_date: new Date().toISOString(),
+      };
+
+      const result = await bookingService.createBooking(payload);
+      setConfirmedBookingResult(result);
       setConfirmModalOpen(false);
     } catch (err) {
-      alert(err.message);
-      setConfirmModalOpen(false);
+      console.error('Failed to commit unit booking:', err);
+      setSubmitError(err.message || 'Failed to complete unit booking. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // SUCCESS VIEW
+  // SUCCESS CONFIRMATION VIEW
   if (confirmedBookingResult) {
+    const booking = confirmedBookingResult;
+    const lead = booking.lead || selectedLead || {};
+    const unit = booking.unit || selectedUnit || {};
+    const projName = unit.building?.project?.name || selectedProject?.name || 'Residential Development';
+    const bldName = unit.building?.name || selectedBuilding?.name || 'Tower';
+    const unitNum = unit.unit_number || unit.unitNumber || 'N/A';
+    const unitPrice = Number(unit.price) || 0;
+    const tokenAmount = Number(booking.amount) || Number(bookingAmount) || 0;
+
     return (
       <div className="max-w-2xl mx-auto py-8">
-        <Card className="text-center p-8 border-emerald-200 bg-white">
-          <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-4">
-            <CheckCircle2 className="w-8 h-8" />
+        <Card className="text-center p-8 border-emerald-200 bg-white shadow-modal animate-in fade-in zoom-in-95">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-4 shadow-sm">
+            <CheckCircle2 className="w-9 h-9" />
           </div>
 
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Booking Confirmed!</h2>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-md mx-auto">
-            Unit allocation has been registered and marked as booked. The customer profile has been updated.
+            Unit allocation has been locked and registered in the active sales registry. Customer allotment dossier is ready.
           </p>
 
           {/* Booking Summary Box */}
-          <div className="mt-6 p-5 rounded-xl bg-slate-50 border border-slate-200/80 text-left space-y-3 text-xs">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-              <span className="text-slate-500">Booking Reference:</span>
-              <span className="font-mono font-bold text-brand-700 text-sm">
-                {confirmedBookingResult.id}
+          <div className="mt-6 p-5 rounded-2xl bg-slate-50/80 border border-slate-200/90 text-left space-y-3 text-xs shadow-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <span className="text-slate-500 font-medium">Booking Reference:</span>
+              <span className="font-mono font-bold text-brand-700 bg-brand-50 px-2.5 py-1 rounded-lg border border-brand-200/80 text-sm">
+                {booking.booking_reference || `BK-${booking.id}`}
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-slate-500">Buyer Name:</span>
-              <span className="font-semibold text-slate-900">{confirmedBookingResult.customerName}</span>
+              <span className="font-semibold text-slate-900">{lead.name || 'Allotted Customer'}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-slate-500">Property & Unit:</span>
+              <span className="text-slate-500">Property & Tower:</span>
               <span className="font-semibold text-slate-900">
-                {confirmedBookingResult.projectName} • {confirmedBookingResult.buildingName} • Unit {confirmedBookingResult.unitNumber}
+                {projName} • {bldName}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-500">Selected Unit:</span>
+              <span className="font-mono font-bold text-brand-700">
+                Unit {unitNum} ({unit.unit_type || 'Luxury Unit'})
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-slate-500">Agreement Value:</span>
-              <span className="font-bold text-slate-900">{formatINR(confirmedBookingResult.totalPrice)}</span>
+              <span className="font-bold text-slate-900 font-mono text-sm">{formatINR(unitPrice)}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-slate-500">Token Amount Received:</span>
-              <span className="font-bold text-emerald-700">{formatINR(confirmedBookingResult.bookingAmount)}</span>
+              <span className="font-bold text-emerald-700 font-mono text-sm">{formatINR(tokenAmount)}</span>
             </div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200">
               <span className="text-slate-500">Sales Representative:</span>
-              <span className="font-medium text-slate-700">{confirmedBookingResult.bookedBy}</span>
+              <span className="font-medium text-slate-700">
+                {booking.bookedBy?.name || 'Direct Sales Staff'}
+              </span>
             </div>
           </div>
 
@@ -148,9 +253,9 @@ export function BookingCreatePage() {
                 View All Bookings
               </Button>
             </Link>
-            <Link to="/units">
+            <Link to={`/bookings/${booking.id}`}>
               <Button variant="secondary" size="md">
-                Check Inventory
+                View Allotment Dossier
               </Button>
             </Link>
           </div>
@@ -161,10 +266,19 @@ export function BookingCreatePage() {
 
   const steps = [
     { num: 1, title: 'Select Lead' },
-    { num: 2, title: 'Select Property' },
+    { num: 2, title: 'Select Development' },
     { num: 3, title: 'Select Unit' },
-    { num: 4, title: 'Confirm' },
+    { num: 4, title: 'Confirm Terms' },
   ];
+
+  if (isLoading) {
+    return (
+      <div className="max-w-3xl mx-auto py-16 text-center">
+        <div className="w-8 h-8 border-3 border-brand-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+        <p className="text-xs text-slate-500 font-medium">Loading live leads and inventory catalog...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -177,13 +291,19 @@ export function BookingCreatePage() {
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>Back to Bookings</span>
         </Link>
-        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mt-2">
-          New Unit Booking Workflow
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mt-2 flex items-center gap-2.5">
+          <span>New Unit Booking Workflow</span>
+          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200/80">
+            Live Allotment
+          </span>
         </h1>
+        <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+          Atomically reserve available property inventory with real-time double-booking protection
+        </p>
       </div>
 
-      {/* 4-Step Progress Indicator */}
-      <div className="p-4 rounded-xl bg-white border border-slate-200/90 shadow-subtle">
+      {/* 4-Step Progress Stepper */}
+      <div className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-subtle">
         <div className="flex items-center justify-between">
           {steps.map((step, idx) => {
             const isCompleted = currentStep > step.num;
@@ -195,9 +315,7 @@ export function BookingCreatePage() {
                   onClick={() => {
                     if (isCompleted) setCurrentStep(step.num);
                   }}
-                  className={`flex items-center gap-2 ${
-                    isCompleted ? 'cursor-pointer' : ''
-                  }`}
+                  className={`flex items-center gap-2 ${isCompleted ? 'cursor-pointer' : ''}`}
                 >
                   <div
                     className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
@@ -233,7 +351,7 @@ export function BookingCreatePage() {
 
       {/* STEP 1: SELECT LEAD */}
       {currentStep === 1 && (
-        <Card>
+        <Card className="rounded-2xl border-slate-200/90 shadow-subtle">
           <CardHeader>
             <div>
               <CardTitle>Step 1: Select Prospective Buyer</CardTitle>
@@ -254,29 +372,58 @@ export function BookingCreatePage() {
             />
 
             <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl">
-              {filteredLeads.map((l) => (
-                <div
-                  key={l.id}
-                  onClick={() => setSelectedLeadId(l.id)}
-                  className={`p-3 flex items-center justify-between cursor-pointer transition-colors text-xs ${
-                    selectedLeadId === l.id ? 'bg-brand-50/80 border-l-4 border-brand-600' : 'hover:bg-slate-50'
-                  }`}
-                >
-                  <div>
-                    <div className="font-semibold text-slate-900">{l.name}</div>
-                    <div className="text-[11px] text-slate-500">
-                      {l.phone} • {l.email}
+              {filteredLeads.length > 0 ? (
+                filteredLeads.map((l) => (
+                  <div
+                    key={l.id}
+                    onClick={() => setSelectedLeadId(String(l.id))}
+                    className={`p-3.5 flex items-center justify-between cursor-pointer transition-colors text-xs ${
+                      String(selectedLeadId) === String(l.id)
+                        ? 'bg-brand-50/90 border-l-4 border-brand-600 font-medium'
+                        : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    <div>
+                      <div className="font-bold text-slate-900 text-sm">{l.name}</div>
+                      <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                        <span className="flex items-center gap-1">
+                          <Phone className="w-3 h-3 text-slate-400" />
+                          {l.phone || 'No phone'}
+                        </span>
+                        <span>•</span>
+                        <span className="flex items-center gap-1">
+                          <Mail className="w-3 h-3 text-slate-400" />
+                          {l.email || 'No email'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[11px] font-semibold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                        {l.stage || 'NEW'}
+                      </span>
+                      <div className="text-[10px] text-slate-400 font-mono mt-1">
+                        {l.assignedSalesEmployee?.name || 'Direct'}
+                      </div>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <span className="text-[11px] font-medium text-slate-600">{l.preferredProject}</span>
-                    <div className="text-[10px] text-slate-400 font-mono">{l.budget}</div>
-                  </div>
+                ))
+              ) : (
+                <div className="p-8 text-center text-xs text-slate-500">
+                  No leads matching search. You can create a new lead first.
                 </div>
-              ))}
+              )}
             </div>
 
-            <div className="flex justify-end pt-3">
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+              <span className="text-xs text-slate-500">
+                {selectedLead ? (
+                  <span>
+                    Selected: <strong>{selectedLead.name}</strong>
+                  </span>
+                ) : (
+                  'Please select a buyer'
+                )}
+              </span>
               <Button
                 variant="primary"
                 size="md"
@@ -291,33 +438,34 @@ export function BookingCreatePage() {
         </Card>
       )}
 
-      {/* STEP 2: SELECT PROPERTY & BUILDING */}
+      {/* STEP 2: SELECT PROPERTY & TOWER */}
       {currentStep === 2 && (
-        <Card>
+        <Card className="rounded-2xl border-slate-200/90 shadow-subtle">
           <CardHeader>
             <div>
               <CardTitle>Step 2: Select Development & Tower</CardTitle>
               <CardDescription>Choose the project and architectural block</CardDescription>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-5">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-2">
-                1. Select Residential Development
+                1. Select Residential Development Project
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {projects.map((proj) => {
-                  const isSelected = selectedProjectId === proj.id;
+                  const isSelected = String(selectedProjectId) === String(proj.id);
                   return (
                     <div
                       key={proj.id}
                       onClick={() => {
-                        setSelectedProjectId(proj.id);
+                        setSelectedProjectId(String(proj.id));
                         setSelectedBuildingId('');
+                        setSelectedUnitId('');
                       }}
-                      className={`p-3.5 rounded-xl border cursor-pointer transition-all text-xs ${
+                      className={`p-4 rounded-xl border cursor-pointer transition-all text-xs ${
                         isSelected
-                          ? 'border-slate-900 bg-slate-900 text-white shadow-subtle'
+                          ? 'border-slate-900 bg-slate-900 text-white shadow-card'
                           : 'border-slate-200 hover:border-slate-300 bg-white'
                       }`}
                     >
@@ -326,7 +474,7 @@ export function BookingCreatePage() {
                         {proj.location}
                       </div>
                       <div className={`mt-2 font-mono ${isSelected ? 'text-emerald-300' : 'text-emerald-700 font-semibold'}`}>
-                        {proj.priceRange}
+                        {proj.price_range || proj.priceRange || 'Luxury Tier'}
                       </div>
                     </div>
                   );
@@ -337,27 +485,38 @@ export function BookingCreatePage() {
             {selectedProject && (
               <div className="pt-3 border-t border-slate-100">
                 <label className="block text-xs font-semibold text-slate-700 mb-2">
-                  2. Select Tower / Block
+                  2. Select Architectural Tower / Block
                 </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {selectedProject.buildings.map((bld) => {
-                    const isSelected = selectedBuildingId === bld.id;
-                    return (
-                      <div
-                        key={bld.id}
-                        onClick={() => setSelectedBuildingId(bld.id)}
-                        className={`p-3 rounded-xl border cursor-pointer transition-all text-xs ${
-                          isSelected
-                            ? 'border-brand-600 bg-brand-50 text-brand-900 font-semibold'
-                            : 'border-slate-200 hover:border-slate-300 bg-white'
-                        }`}
-                      >
-                        <div>{bld.name}</div>
-                        <div className="text-[10px] text-slate-500 mt-0.5">{bld.floors} Floors</div>
-                      </div>
-                    );
-                  })}
-                </div>
+                {availableBuildings.length > 0 ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {availableBuildings.map((bld) => {
+                      const isSelected = String(selectedBuildingId) === String(bld.id);
+                      return (
+                        <div
+                          key={bld.id}
+                          onClick={() => {
+                            setSelectedBuildingId(String(bld.id));
+                            setSelectedUnitId('');
+                          }}
+                          className={`p-3.5 rounded-xl border cursor-pointer transition-all text-xs ${
+                            isSelected
+                              ? 'border-brand-600 bg-brand-50 text-brand-900 font-bold'
+                              : 'border-slate-200 hover:border-slate-300 bg-white'
+                          }`}
+                        >
+                          <div className="font-semibold">{bld.name}</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            {bld.description || 'Residential Block'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-4 bg-slate-50 text-slate-500 rounded-xl text-xs">
+                    No towers registered under this development yet.
+                  </div>
+                )}
               </div>
             )}
 
@@ -381,25 +540,24 @@ export function BookingCreatePage() {
 
       {/* STEP 3: SELECT UNIT */}
       {currentStep === 3 && (
-        <Card>
+        <Card className="rounded-2xl border-slate-200/90 shadow-subtle">
           <CardHeader>
             <div>
               <CardTitle>Step 3: Select Available Unit</CardTitle>
               <CardDescription>
-                Live inventory for {selectedProject?.name} •{' '}
-                {selectedProject?.buildings.find((b) => b.id === selectedBuildingId)?.name}
+                Live available inventory for {selectedProject?.name} • {selectedBuilding?.name}
               </CardDescription>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {availableUnits.length > 0 ? (
+            {filteredUnits.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-80 overflow-y-auto p-1">
-                {availableUnits.map((unit) => {
-                  const isSelected = selectedUnitId === unit.id;
+                {filteredUnits.map((unit) => {
+                  const isSelected = String(selectedUnitId) === String(unit.id);
                   return (
                     <div
                       key={unit.id}
-                      onClick={() => setSelectedUnitId(unit.id)}
+                      onClick={() => setSelectedUnitId(String(unit.id))}
                       className={`p-4 rounded-xl border cursor-pointer transition-all text-xs flex flex-col justify-between ${
                         isSelected
                           ? 'border-slate-900 bg-slate-900 text-white shadow-card'
@@ -409,7 +567,7 @@ export function BookingCreatePage() {
                       <div className="flex items-start justify-between">
                         <div>
                           <span className="font-mono font-bold text-sm tracking-tight">
-                            Unit {unit.unitNumber}
+                            Unit {unit.unit_number || unit.unitNumber}
                           </span>
                           <div className={`text-[11px] ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
                             Floor {unit.floor} • {unit.facing || 'East Facing'}
@@ -420,7 +578,7 @@ export function BookingCreatePage() {
                             isSelected ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'
                           }`}
                         >
-                          {unit.type}
+                          {unit.unit_type || unit.type}
                         </span>
                       </div>
 
@@ -428,7 +586,11 @@ export function BookingCreatePage() {
                         <span className={`text-[11px] ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
                           {unit.area} sq ft
                         </span>
-                        <span className={`font-bold font-mono text-sm ${isSelected ? 'text-emerald-300' : 'text-slate-900'}`}>
+                        <span
+                          className={`font-bold font-mono text-sm ${
+                            isSelected ? 'text-emerald-300' : 'text-slate-900'
+                          }`}
+                        >
                           {formatINR(unit.price)}
                         </span>
                       </div>
@@ -438,7 +600,7 @@ export function BookingCreatePage() {
               </div>
             ) : (
               <div className="p-8 text-center text-xs text-slate-500 bg-slate-50 rounded-xl">
-                No units available in this tower right now. Please select another tower.
+                No units available in this tower right now. Please go back and select another tower or development.
               </div>
             )}
 
@@ -460,9 +622,9 @@ export function BookingCreatePage() {
         </Card>
       )}
 
-      {/* STEP 4: REVIEW BOOKING SUMMARY */}
+      {/* STEP 4: REVIEW & CONFIRM */}
       {currentStep === 4 && (
-        <Card>
+        <Card className="rounded-2xl border-slate-200/90 shadow-subtle">
           <CardHeader>
             <div>
               <CardTitle>Step 4: Booking Summary & Final Review</CardTitle>
@@ -472,28 +634,38 @@ export function BookingCreatePage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
+            {submitError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{submitError}</span>
+              </div>
+            )}
+
             {/* Detail Grid */}
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/90 divide-y divide-slate-200 text-xs">
               <div className="py-2.5 first:pt-0 flex items-center justify-between">
                 <span className="text-slate-500">Prospective Buyer:</span>
-                <span className="font-semibold text-slate-900">{selectedLead?.name || 'Selected Lead'}</span>
+                <span className="font-semibold text-slate-900">{selectedLead?.name || 'Selected Customer'}</span>
               </div>
               <div className="py-2.5 flex items-center justify-between">
                 <span className="text-slate-500">Contact Details:</span>
                 <span className="text-slate-700 font-mono">
-                  {selectedLead?.phone} • {selectedLead?.email}
+                  {selectedLead?.phone || 'No phone'} • {selectedLead?.email || 'No email'}
                 </span>
               </div>
               <div className="py-2.5 flex items-center justify-between">
-                <span className="text-slate-500">Project & Building:</span>
+                <span className="text-slate-500">Project & Tower:</span>
                 <span className="font-semibold text-slate-900">
-                  {selectedUnit?.projectName} ({selectedUnit?.buildingName})
+                  {selectedUnit?.building?.project?.name || selectedProject?.name || 'Project'} (
+                  {selectedUnit?.building?.name || selectedBuilding?.name || 'Tower'})
                 </span>
               </div>
               <div className="py-2.5 flex items-center justify-between">
                 <span className="text-slate-500">Selected Unit:</span>
-                <span className="font-mono font-bold text-slate-900">
-                  Unit {selectedUnit?.unitNumber} ({selectedUnit?.type}, {selectedUnit?.area} sq ft)
+                <span className="font-mono font-bold text-brand-700">
+                  Unit {selectedUnit?.unit_number || selectedUnit?.unitNumber} (
+                  {selectedUnit?.unit_type || selectedUnit?.type}, {selectedUnit?.area} sq ft, Floor{' '}
+                  {selectedUnit?.floor}th)
                 </span>
               </div>
               <div className="py-2.5 flex items-center justify-between">
@@ -507,12 +679,18 @@ export function BookingCreatePage() {
             {/* Token Deposit Amount */}
             <div className="space-y-1.5 max-w-sm">
               <Input
-                label="Booking Token Amount (₹)"
+                label="Initial Booking Token Deposit (₹)"
                 type="number"
                 value={bookingAmount}
                 onChange={(e) => setBookingAmount(e.target.value)}
                 helperText="Minimum recommended token is ₹2,00,000"
               />
+              <div className="text-[11px] text-slate-500 flex items-center justify-between pt-1">
+                <span>Formatted Preview:</span>
+                <span className="font-bold font-mono text-emerald-700">
+                  {formatINR(parseFloat(bookingAmount) || 0)}
+                </span>
+              </div>
             </div>
 
             <div className="flex items-center justify-between pt-4 border-t border-slate-100">
@@ -535,37 +713,48 @@ export function BookingCreatePage() {
       {/* Confirmation Modal */}
       <Modal
         isOpen={confirmModalOpen}
-        onClose={() => setConfirmModalOpen(false)}
+        onClose={() => !isSubmitting && setConfirmModalOpen(false)}
         title="Confirm Unit Allocation"
-        description="Are you sure you want to finalize this unit booking?"
-        maxWidth="max-w-md"
+        description="Are you sure you want to finalize this unit reservation in MySQL?"
+        size="sm"
       >
         <div className="space-y-4 text-xs">
           <p className="text-slate-600 leading-relaxed">
             You are about to book{' '}
             <strong className="text-slate-900">
-              Unit {selectedUnit?.unitNumber} ({selectedUnit?.projectName})
+              Unit {selectedUnit?.unit_number || selectedUnit?.unitNumber}
             </strong>{' '}
-            for <strong className="text-slate-900">{selectedLead?.name}</strong>.
+            for <strong className="text-slate-900">{selectedLead?.name}</strong>. The unit will be locked and
+            marked as <strong>BOOKED</strong>.
           </p>
 
-          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5 font-mono">
             <div className="flex justify-between">
-              <span className="text-slate-500">Unit Price:</span>
-              <span className="font-semibold">{formatINR(selectedUnit?.price)}</span>
+              <span className="text-slate-500 font-sans">Unit Price:</span>
+              <span className="font-bold text-slate-900">{formatINR(selectedUnit?.price)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-500">Token Amount:</span>
-              <span className="font-bold text-emerald-700">{formatINR(bookingAmount)}</span>
+              <span className="text-slate-500 font-sans">Token Amount:</span>
+              <span className="font-bold text-emerald-700">{formatINR(parseFloat(bookingAmount) || 0)}</span>
             </div>
           </div>
 
           <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
-            <Button variant="secondary" size="sm" onClick={() => setConfirmModalOpen(false)}>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={isSubmitting}
+              onClick={() => setConfirmModalOpen(false)}
+            >
               Cancel
             </Button>
-            <Button variant="primary" size="sm" onClick={handleConfirmSubmit}>
-              Commit & Book Unit
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={isSubmitting}
+              onClick={handleConfirmSubmit}
+            >
+              {isSubmitting ? 'Reserving...' : 'Commit & Book Unit'}
             </Button>
           </div>
         </div>

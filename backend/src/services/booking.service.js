@@ -1,6 +1,7 @@
+const { Op } = require('sequelize');
 const { sequelize, Booking, Unit, Lead } = require('../models');
+const { BOOKING_STATUS, BOOKING_STATUS_VALUES } = require('../constants/bookingStatus');
 const { UNIT_STATUS } = require('../constants/unitStatus');
-const { BOOKING_STATUS } = require('../constants/bookingStatus');
 const { LEAD_STAGES } = require('../constants/leadStages');
 const { ROLES } = require('../constants/roles');
 const {
@@ -28,7 +29,6 @@ class BookingService {
 
     try {
       // 2. CRITICAL ROW LOCK: SELECT ... FOR UPDATE
-      // This prevents any concurrent process from reading or modifying the same unit row until this transaction commits/rolls back.
       const unit = await Unit.findByPk(unit_id, {
         transaction,
         lock: transaction.LOCK.UPDATE,
@@ -88,6 +88,7 @@ class BookingService {
           booking_date: booking_date ? new Date(booking_date) : new Date(),
           amount: amount !== undefined ? amount : unit.price,
           status: BOOKING_STATUS.CONFIRMED,
+          payment_status: 'TOKEN_RECEIVED',
         },
         { transaction }
       );
@@ -102,7 +103,6 @@ class BookingService {
       // Fetch and return full populated booking
       return bookingRepository.findByIdWithDetails(booking.id);
     } catch (error) {
-      // Rollback on any failure or constraint violation
       await transaction.rollback();
       throw error;
     }
@@ -112,9 +112,10 @@ class BookingService {
    * Cancel an existing booking and release the unit back to AVAILABLE
    * @param {number|string} bookingId
    * @param {Object} currentUser
+   * @param {string} [reason]
    * @returns {Promise<Object>}
    */
-  async cancelBooking(bookingId, currentUser) {
+  async cancelBooking(bookingId, currentUser, reason = '') {
     const transaction = await sequelize.transaction();
 
     try {
@@ -136,8 +137,14 @@ class BookingService {
         throw new ForbiddenError('You do not have permission to cancel this booking', 'FORBIDDEN');
       }
 
-      // Update booking status
-      await booking.update({ status: BOOKING_STATUS.CANCELLED }, { transaction });
+      // Update booking status and save cancellation reason
+      await booking.update(
+        {
+          status: BOOKING_STATUS.CANCELLED,
+          cancellation_reason: reason || 'Customer requested cancellation',
+        },
+        { transaction }
+      );
 
       // Release unit back to AVAILABLE
       const unit = await Unit.findByPk(booking.unit_id, {
@@ -160,30 +167,83 @@ class BookingService {
   }
 
   /**
+   * Update booking status and payment status
+   * @param {number|string} bookingId
+   * @param {Object} updateData
+   * @param {Object} currentUser
+   * @returns {Promise<Object>}
+   */
+  async updateBookingStatus(bookingId, updateData, currentUser) {
+    const booking = await Booking.findByPk(bookingId);
+    if (!booking) {
+      throw new NotFoundError(`Booking with ID ${bookingId} was not found`, 'BOOKING_NOT_FOUND');
+    }
+
+    if (currentUser.role !== ROLES.ADMIN && booking.booked_by !== currentUser.id) {
+      throw new ForbiddenError('You do not have permission to update this booking', 'FORBIDDEN');
+    }
+
+    const { status, payment_status, cancellation_reason } = updateData;
+
+    // If changing to CANCELLED, invoke cancelBooking to release the unit
+    if (status === BOOKING_STATUS.CANCELLED && booking.status !== BOOKING_STATUS.CANCELLED) {
+      return this.cancelBooking(bookingId, currentUser, cancellation_reason);
+    }
+
+    const updates = {};
+    if (status && BOOKING_STATUS_VALUES.includes(status)) {
+      updates.status = status;
+    }
+    if (payment_status) {
+      updates.payment_status = payment_status;
+    }
+
+    await booking.update(updates);
+    logger.info(`Booking ID ${bookingId} status updated: status=${updates.status || booking.status}`);
+    return bookingRepository.findByIdWithDetails(bookingId);
+  }
+
+  /**
    * List bookings with role scoping and pagination
    * @param {Object} queryParams
    * @param {Object} currentUser
    * @returns {Promise<{ bookings: Array, pagination: Object }>}
    */
   async getBookings(queryParams, currentUser) {
-    const { page, limit, offset, order } = parsePaginationParams(
+    const { page, limit, offset, search, order } = parsePaginationParams(
       queryParams,
       'created_at',
       ['id', 'booking_reference', 'booking_date', 'amount', 'status', 'created_at']
     );
 
     const where = {};
+    const projectWhere = {};
 
     if (currentUser.role === ROLES.SALES) {
       where.booked_by = currentUser.id;
+    } else if (queryParams.agent_id || queryParams.booked_by) {
+      where.booked_by = parseInt(queryParams.agent_id || queryParams.booked_by, 10);
     }
 
     if (queryParams.status) {
       where.status = queryParams.status;
     }
 
+    if (queryParams.payment_status) {
+      where.payment_status = queryParams.payment_status;
+    }
+
+    if (queryParams.project_id) {
+      projectWhere.id = parseInt(queryParams.project_id, 10);
+    }
+
+    if (search) {
+      where.booking_reference = { [Op.like]: `%${search}%` };
+    }
+
     const { rows, count } = await bookingRepository.findAndCountAllFiltered({
       where,
+      projectWhere,
       limit,
       offset,
       order,

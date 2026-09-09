@@ -47,8 +47,22 @@ class BookingController {
    */
   async cancel(req, res, next) {
     try {
-      const booking = await bookingService.cancelBooking(req.params.id, req.user);
+      const reason = req.body?.reason || req.body?.cancellation_reason;
+      const booking = await bookingService.cancelBooking(req.params.id, req.user, reason);
       return sendSuccess(res, 'Booking cancelled successfully and unit released to inventory', { booking });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * Update booking status and payment status
+   * PATCH /api/v1/bookings/:id/status
+   */
+  async updateStatus(req, res, next) {
+    try {
+      const booking = await bookingService.updateBookingStatus(req.params.id, req.body, req.user);
+      return sendSuccess(res, 'Booking status updated successfully', { booking });
     } catch (error) {
       return next(error);
     }

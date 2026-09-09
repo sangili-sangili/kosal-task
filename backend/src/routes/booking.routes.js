@@ -36,6 +36,24 @@ router.get('/:id', (req, res, next) => {
 });
 
 /**
+ * @route   PATCH /api/v1/bookings/:id/status
+ * @desc    Update booking lifecycle and payment status
+ * @access  Private (ADMIN, Booking Owner)
+ */
+router.patch('/:id/status', (req, res, next) => {
+  return bookingController.updateStatus(req, res, next);
+});
+
+/**
+ * @route   PATCH /api/v1/bookings/:id
+ * @desc    Update booking details
+ * @access  Private (ADMIN, Booking Owner)
+ */
+router.patch('/:id', (req, res, next) => {
+  return bookingController.updateStatus(req, res, next);
+});
+
+/**
  * @route   PATCH /api/v1/bookings/:id/cancel
  * @desc    Cancel booking and release unit back to AVAILABLE
  * @access  Private (ADMIN, Booking Owner)
