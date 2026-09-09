@@ -21,7 +21,7 @@ import { useCrm } from '../../context/CrmContext';
 import { useAuth } from '../../hooks/useAuth';
 
 export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
-  const { leads, bookings, units, currentUser, roles = [] } = useCrm();
+  const { leads, bookings, units, currentUser, employees = [], roles = [] } = useCrm();
   const { user } = useAuth();
   const activeUser = user || currentUser;
   const isAdmin = activeUser?.role === 'ADMIN';
