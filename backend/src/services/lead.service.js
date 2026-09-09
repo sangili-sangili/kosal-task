@@ -5,6 +5,7 @@ const { ROLES } = require('../constants/roles');
 const { parsePaginationParams, formatPaginationResponse } = require('../utils/pagination');
 const { NotFoundError, ForbiddenError, BadRequestError } = require('../utils/errors');
 const logger = require('../config/logger');
+const auditService = require('./audit.service');
 
 class LeadService {
   /**
@@ -37,6 +38,28 @@ class LeadService {
     const lead = await leadRepository.findById(created.id);
 
     logger.info(`Lead created: ID ${lead.id} (${lead.name}) by user ID ${currentUser.id}`);
+
+    auditService.logEvent({
+      action: 'CREATE',
+      entityType: 'LEAD',
+      entityId: String(lead.id),
+      entityTitle: lead.name,
+      summary: `New customer lead "${lead.name}" created (Phone: ${lead.phone || 'N/A'}, Stage: ${lead.stage || 'NEW'}, Source: ${lead.source || 'Website'}).`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: 'SUCCESS',
+      details: {
+        leadId: lead.id,
+        name: lead.name,
+        phone: lead.phone,
+        email: lead.email,
+        stage: lead.stage,
+        source: lead.source,
+      },
+    });
+
     return lead;
   }
 
@@ -171,6 +194,24 @@ class LeadService {
     const updatedLead = await leadRepository.findById(id);
 
     logger.info(`Lead ID ${id} updated by user ID ${currentUser.id}`);
+
+    auditService.logEvent({
+      action: 'UPDATE',
+      entityType: 'LEAD',
+      entityId: String(id),
+      entityTitle: updatedLead.name,
+      summary: `Lead profile details updated for "${updatedLead.name}".`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: 'INFO',
+      details: {
+        leadId: id,
+        updatedFields: payload,
+      },
+    });
+
     return updatedLead;
   }
 
@@ -200,6 +241,25 @@ class LeadService {
     const updatedLead = await leadRepository.findById(id);
 
     logger.info(`Lead ID ${id} stage changed from ${oldStage} -> ${stage} by user ID ${currentUser.id}`);
+
+    auditService.logEvent({
+      action: 'STAGE_CHANGE',
+      entityType: 'LEAD',
+      entityId: String(id),
+      entityTitle: updatedLead.name,
+      summary: `Lead stage progressed from "${oldStage}" to "${stage}" for "${updatedLead.name}".`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: stage === 'BOOKED' ? 'SUCCESS' : stage === 'LOST' ? 'WARNING' : 'INFO',
+      details: {
+        leadId: id,
+        previousStage: oldStage,
+        newStage: stage,
+      },
+    });
+
     return updatedLead;
   }
 
@@ -221,6 +281,20 @@ class LeadService {
 
     await lead.destroy();
     logger.info(`Lead ID ${id} soft-deleted by admin ID ${currentUser.id}`);
+
+    auditService.logEvent({
+      action: 'DELETE',
+      entityType: 'LEAD',
+      entityId: String(id),
+      entityTitle: lead.name,
+      summary: `Lead record "${lead.name}" (ID ${id}) soft-deleted by administrator.`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: 'WARNING',
+    });
+
     return true;
   }
 }

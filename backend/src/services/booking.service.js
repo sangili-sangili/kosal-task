@@ -13,6 +13,7 @@ const {
 const { parsePaginationParams, formatPaginationResponse } = require('../utils/pagination');
 const bookingRepository = require('../repositories/booking.repository');
 const logger = require('../config/logger');
+const auditService = require('./audit.service');
 
 class BookingService {
   /**
@@ -100,6 +101,27 @@ class BookingService {
         `Booking ${booking.booking_reference} confirmed for Unit ID ${unit.id} by User ID ${currentUser.id}`
       );
 
+      auditService.logEvent({
+        action: 'CREATE',
+        entityType: 'BOOKING',
+        entityId: booking.booking_reference,
+        entityTitle: `${booking.booking_reference} - ${lead.name}`,
+        summary: `Booking allotment confirmed for Unit ${unit.unit_number} (Amount: Rs. ${Number(booking.amount).toLocaleString('en-IN')}).`,
+        actorId: currentUser?.id,
+        actorName: currentUser?.name,
+        actorEmail: currentUser?.email,
+        actorRole: currentUser?.role,
+        severity: 'SUCCESS',
+        details: {
+          bookingReference: booking.booking_reference,
+          unitId: unit.id,
+          unitNumber: unit.unit_number,
+          leadId: lead.id,
+          leadName: lead.name,
+          amount: booking.amount,
+        },
+      });
+
       // Fetch and return full populated booking
       return bookingRepository.findByIdWithDetails(booking.id);
     } catch (error) {
@@ -159,6 +181,24 @@ class BookingService {
       await transaction.commit();
 
       logger.info(`Booking ${booking.booking_reference} cancelled, unit released back to AVAILABLE`);
+
+      auditService.logEvent({
+        action: 'BLOCK',
+        entityType: 'BOOKING',
+        entityId: booking.booking_reference,
+        entityTitle: `${booking.booking_reference}`,
+        summary: `Booking ${booking.booking_reference} cancelled and unit released back to available inventory. Reason: ${reason || 'N/A'}.`,
+        actorId: currentUser?.id,
+        actorName: currentUser?.name,
+        actorEmail: currentUser?.email,
+        actorRole: currentUser?.role,
+        severity: 'WARNING',
+        details: {
+          bookingReference: booking.booking_reference,
+          reason,
+        },
+      });
+
       return bookingRepository.findByIdWithDetails(booking.id);
     } catch (error) {
       await transaction.rollback();
@@ -200,6 +240,25 @@ class BookingService {
 
     await booking.update(updates);
     logger.info(`Booking ID ${bookingId} status updated: status=${updates.status || booking.status}`);
+
+    const isApproved = updates.status === 'CONFIRMED' || updates.payment_status === 'COMPLETED';
+    auditService.logEvent({
+      action: isApproved ? 'APPROVE' : 'UPDATE',
+      entityType: 'BOOKING',
+      entityId: booking.booking_reference,
+      entityTitle: `${booking.booking_reference}`,
+      summary: `Booking ${booking.booking_reference} updated. Status: ${updates.status || booking.status}, Payment: ${updates.payment_status || booking.payment_status}.`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: isApproved ? 'SUCCESS' : 'INFO',
+      details: {
+        bookingReference: booking.booking_reference,
+        updates,
+      },
+    });
+
     return bookingRepository.findByIdWithDetails(bookingId);
   }
 

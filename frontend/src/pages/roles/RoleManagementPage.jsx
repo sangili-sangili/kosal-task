@@ -6,6 +6,7 @@ import {
   RotateCcw, Sparkles, Search, XCircle, Copy,
 } from 'lucide-react';
 import { userService } from '../../services/userService';
+import { auditService } from '../../services/auditService';
 import { Card, CardContent } from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
@@ -249,6 +250,22 @@ export function RoleManagementPage() {
     setSelectedRoleCode(code);
     setCreateModalOpen(false);
     showFeedback(`Role "${name}" created with ${templatePerms.length} permissions cloned from template.`);
+
+    auditService.createAuditLog({
+      action: 'SECURITY',
+      entityType: 'ROLE',
+      entityId: code,
+      entityTitle: `${name} (${code})`,
+      summary: `New custom security profile "${name}" created with ${templatePerms.length} permissions cloned from ${newRoleForm.templateCode || 'scratch'}.`,
+      severity: 'SUCCESS',
+      details: {
+        code,
+        name,
+        description: desc,
+        clonedFrom: newRoleForm.templateCode || null,
+        permissionsCount: templatePerms.length,
+      },
+    }).catch((err) => console.error('Failed to log role creation:', err));
   };
 
   const handleDeleteCustomRole = () => {
@@ -259,6 +276,19 @@ export function RoleManagementPage() {
     setSelectedRoleCode(allRoles.find((r) => r.code !== code)?.code || '');
     setDeleteModalRole(null);
     showFeedback(`Role "${deleteModalRole.name}" has been deleted.`);
+
+    auditService.createAuditLog({
+      action: 'DELETE',
+      entityType: 'ROLE',
+      entityId: deleteModalRole.code,
+      entityTitle: `${deleteModalRole.name} (${deleteModalRole.code})`,
+      summary: `Custom security role "${deleteModalRole.name}" was permanently removed.`,
+      severity: 'WARNING',
+      details: {
+        code: deleteModalRole.code,
+        name: deleteModalRole.name,
+      },
+    }).catch((err) => console.error('Failed to log role deletion:', err));
   };
 
   // ── Permission toggle handlers ────────────────────────────────────────────────
@@ -269,6 +299,19 @@ export function RoleManagementPage() {
       : [...cur, permId];
     setRolePermissions((prev) => ({ ...prev, [selectedRoleCode]: next }));
     showSaved();
+
+    auditService.createAuditLog({
+      action: 'SECURITY',
+      entityType: 'ROLE',
+      entityId: selectedRoleCode,
+      entityTitle: `${selectedRole?.name || selectedRoleCode} Permissions`,
+      summary: `Permission access matrix updated for role "${selectedRole?.name || selectedRoleCode}". Total active permissions: ${next.length}.`,
+      severity: 'INFO',
+      details: {
+        role: selectedRoleCode,
+        permissionsCount: next.length,
+      },
+    }).catch((err) => console.error('Failed to log permission change:', err));
   };
 
   const handleModuleToggleAll = (modulePermIds, enableAll) => {
@@ -278,6 +321,21 @@ export function RoleManagementPage() {
       : cur.filter((p) => !modulePermIds.includes(p));
     setRolePermissions((prev) => ({ ...prev, [selectedRoleCode]: next }));
     showSaved();
+
+    auditService.createAuditLog({
+      action: 'SECURITY',
+      entityType: 'ROLE',
+      entityId: selectedRoleCode,
+      entityTitle: `${selectedRole?.name || selectedRoleCode} Permissions`,
+      summary: `${enableAll ? 'Granted' : 'Revoked'} all module permissions for role "${selectedRole?.name || selectedRoleCode}". Total active permissions: ${next.length}.`,
+      severity: 'INFO',
+      details: {
+        role: selectedRoleCode,
+        modulePermIds,
+        enableAll,
+        permissionsCount: next.length,
+      },
+    }).catch((err) => console.error('Failed to log module permission change:', err));
   };
 
   // ── Filtered modules ──────────────────────────────────────────────────────────

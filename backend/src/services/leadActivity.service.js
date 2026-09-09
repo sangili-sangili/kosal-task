@@ -4,6 +4,7 @@ const leadFollowupRepository = require('../repositories/leadFollowup.repository'
 const { ROLES } = require('../constants/roles');
 const { NotFoundError } = require('../utils/errors');
 const logger = require('../config/logger');
+const auditService = require('./audit.service');
 
 class LeadActivityService {
   /**
@@ -25,6 +26,21 @@ class LeadActivityService {
 
     const populatedNote = await leadNoteRepository.findByIdWithUser(note.id);
     logger.info(`Note added to Lead ID ${leadId} by User ID ${currentUser.id}`);
+
+    auditService.logEvent({
+      action: 'UPDATE',
+      entityType: 'LEAD',
+      entityId: String(leadId),
+      entityTitle: `Lead #${leadId}`,
+      summary: `Note added to lead #${leadId}: "${noteText.substring(0, 75)}${noteText.length > 75 ? '...' : ''}"`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: 'INFO',
+      details: { leadId, noteId: note.id },
+    });
+
     return populatedNote;
   }
 
@@ -68,6 +84,21 @@ class LeadActivityService {
 
     const populatedFollowup = await leadFollowupRepository.findByIdWithUser(followup.id);
     logger.info(`Follow-up scheduled for Lead ID ${leadId} at ${followupData.follow_up_date} by User ID ${currentUser.id}`);
+
+    auditService.logEvent({
+      action: 'UPDATE',
+      entityType: 'LEAD',
+      entityId: String(leadId),
+      entityTitle: `Lead #${leadId}`,
+      summary: `Follow-up scheduled for lead #${leadId} on ${dateOnly}.`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: 'INFO',
+      details: { leadId, followupDate: dateOnly },
+    });
+
     return populatedFollowup;
   }
 
@@ -108,6 +139,20 @@ class LeadActivityService {
     const updatedFollowup = await leadFollowupRepository.findByIdWithUser(followupId);
 
     logger.info(`Follow-up ID ${followupId} status changed to ${status} by User ID ${currentUser.id}`);
+
+    auditService.logEvent({
+      action: 'UPDATE',
+      entityType: 'LEAD',
+      entityId: String(leadId),
+      entityTitle: `Lead #${leadId}`,
+      summary: `Follow-up marked as ${status} for lead #${leadId}.`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: status === 'COMPLETED' ? 'SUCCESS' : 'INFO',
+    });
+
     return updatedFollowup;
   }
 }

@@ -5,13 +5,14 @@ const unitRepository = require('../repositories/unit.repository');
 const { parsePaginationParams, formatPaginationResponse } = require('../utils/pagination');
 const { NotFoundError, ConflictError, BadRequestError } = require('../utils/errors');
 const logger = require('../config/logger');
+const auditService = require('./audit.service');
 
 class PropertyService {
   // ==========================================
   // PROJECT SERVICES
   // ==========================================
 
-  async createProject(projectData) {
+  async createProject(projectData, currentUser) {
     const data = {
       ...projectData,
       cover_image: projectData.cover_image !== undefined ? projectData.cover_image : (projectData.coverImage !== undefined ? projectData.coverImage : null),
@@ -21,6 +22,21 @@ class PropertyService {
     };
     const project = await projectRepository.create(data);
     logger.info(`Project created: ID ${project.id} (${project.name})`);
+
+    auditService.logEvent({
+      action: 'CREATE',
+      entityType: 'PROPERTY',
+      entityId: String(project.id),
+      entityTitle: project.name,
+      summary: `New property project "${project.name}" registered in ${project.location || 'N/A'}.`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: 'SUCCESS',
+      details: { projectId: project.id, name: project.name, location: project.location },
+    });
+
     return project;
   }
 
@@ -36,7 +52,7 @@ class PropertyService {
     return project;
   }
 
-  async updateProject(id, updateData) {
+  async updateProject(id, updateData, currentUser) {
     const project = await projectRepository.findById(id);
     if (!project) {
       throw new NotFoundError(`Project with ID ${id} was not found`, 'PROJECT_NOT_FOUND');
@@ -58,10 +74,25 @@ class PropertyService {
 
     await project.update(data);
     logger.info(`Project ID ${id} updated`);
+
+    auditService.logEvent({
+      action: 'UPDATE',
+      entityType: 'PROPERTY',
+      entityId: String(id),
+      entityTitle: project.name,
+      summary: `Property project specifications updated for "${project.name}".`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: 'INFO',
+      details: { projectId: id, updatedFields: data },
+    });
+
     return project;
   }
 
-  async deleteProject(id) {
+  async deleteProject(id, currentUser) {
     const project = await projectRepository.findById(id);
     if (!project) {
       throw new NotFoundError(`Project with ID ${id} was not found`, 'PROJECT_NOT_FOUND');
@@ -69,6 +100,20 @@ class PropertyService {
 
     await project.destroy();
     logger.info(`Project ID ${id} deleted`);
+
+    auditService.logEvent({
+      action: 'DELETE',
+      entityType: 'PROPERTY',
+      entityId: String(id),
+      entityTitle: project.name,
+      summary: `Property project "${project.name}" (ID ${id}) removed from catalog.`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: 'WARNING',
+    });
+
     return true;
   }
 
@@ -129,7 +174,7 @@ class PropertyService {
   // UNIT INVENTORY SERVICES
   // ==========================================
 
-  async createUnit(unitData) {
+  async createUnit(unitData, currentUser) {
     const buildingId = unitData.building_id || unitData.buildingId;
     const unitNumber = unitData.unit_number || unitData.unitNumber;
     const unitType = unitData.unit_type || unitData.unitType;
@@ -158,6 +203,21 @@ class PropertyService {
     const created = await unitRepository.create(data);
     const unit = await unitRepository.findByIdWithDetails(created.id);
     logger.info(`Unit created: ID ${unit.id} (${unit.unit_number}) in Building ID ${unit.building_id}`);
+
+    auditService.logEvent({
+      action: 'CREATE',
+      entityType: 'UNIT',
+      entityId: String(unit.id),
+      entityTitle: `Unit ${unit.unit_number}`,
+      summary: `Unit ${unit.unit_number} (${unit.unit_type || 'N/A'}) created in inventory. Price: Rs. ${Number(unit.price || 0).toLocaleString('en-IN')}.`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: 'SUCCESS',
+      details: { unitId: unit.id, unitNumber: unit.unit_number, price: unit.price, status: unit.status },
+    });
+
     return unit;
   }
 
@@ -233,7 +293,7 @@ class PropertyService {
     return unit;
   }
 
-  async updateUnit(id, updateData) {
+  async updateUnit(id, updateData, currentUser) {
     const unit = await unitRepository.findById(id);
     if (!unit) {
       throw new NotFoundError(`Unit with ID ${id} was not found`, 'UNIT_NOT_FOUND');
@@ -261,10 +321,28 @@ class PropertyService {
     await unit.update(data);
     const updated = await unitRepository.findByIdWithDetails(id);
     logger.info(`Unit ID ${id} updated`);
+
+    const isBlock = data.status === 'BLOCKED' || data.status === 'HOLD';
+    auditService.logEvent({
+      action: isBlock ? 'BLOCK' : 'UPDATE',
+      entityType: 'UNIT',
+      entityId: String(id),
+      entityTitle: `Unit ${unit.unit_number}`,
+      summary: isBlock
+        ? `Unit ${unit.unit_number} placed on ${data.status || 'BLOCKED'} status.`
+        : `Unit ${unit.unit_number} details updated. Status: ${data.status || unit.status}.`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: isBlock ? 'WARNING' : 'INFO',
+      details: { unitId: id, unitNumber: unit.unit_number, updatedFields: data },
+    });
+
     return updated;
   }
 
-  async deleteUnit(id) {
+  async deleteUnit(id, currentUser) {
     const unit = await unitRepository.findById(id);
     if (!unit) {
       throw new NotFoundError(`Unit with ID ${id} was not found`, 'UNIT_NOT_FOUND');
@@ -272,6 +350,21 @@ class PropertyService {
 
     await unit.destroy();
     logger.info(`Unit ID ${id} deleted`);
+
+    auditService.logEvent({
+      action: 'DELETE',
+      entityType: 'UNIT',
+      entityId: String(id),
+      entityTitle: `Unit ${unit.unit_number}`,
+      summary: `Unit ${unit.unit_number} (ID ${id}) removed from inventory.`,
+      actorId: currentUser?.id,
+      actorName: currentUser?.name,
+      actorEmail: currentUser?.email,
+      actorRole: currentUser?.role,
+      severity: 'WARNING',
+      details: { unitId: id, unitNumber: unit.unit_number },
+    });
+
     return true;
   }
 }

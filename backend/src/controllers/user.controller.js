@@ -3,6 +3,7 @@ const { User } = require('../models');
 const { sendSuccess } = require('../utils/response');
 const { ROLES } = require('../constants/roles');
 const { Op } = require('sequelize');
+const auditService = require('../services/audit.service');
 
 class UserController {
   /**
@@ -104,6 +105,21 @@ class UserController {
 
       const { password_hash: _ph, ...safeUser } = user.toJSON ? user.toJSON() : user.get();
 
+      auditService.logEvent({
+        action: 'CREATE',
+        entityType: 'USER',
+        entityId: String(user.id),
+        entityTitle: `${user.name} (${user.role})`,
+        summary: `Created new user account "${user.name}" with role ${user.role}.`,
+        actorId: req.user?.id,
+        actorName: req.user?.name,
+        actorEmail: req.user?.email,
+        actorRole: req.user?.role,
+        ipAddress: req.ip || '127.0.0.1',
+        severity: 'SUCCESS',
+        details: { userId: user.id, email: user.email, role: user.role },
+      });
+
       return res.status(201).json({ success: true, message: 'User created successfully', data: safeUser });
     } catch (err) {
       return next(err);
@@ -134,6 +150,21 @@ class UserController {
         ...(is_active !== undefined && { is_active }),
       });
 
+      auditService.logEvent({
+        action: 'UPDATE',
+        entityType: 'USER',
+        entityId: String(user.id),
+        entityTitle: `${user.name} (${user.role})`,
+        summary: `Updated profile details for user "${user.name}".`,
+        actorId: req.user?.id,
+        actorName: req.user?.name,
+        actorEmail: req.user?.email,
+        actorRole: req.user?.role,
+        ipAddress: req.ip || '127.0.0.1',
+        severity: 'INFO',
+        details: { updatedFields: { name, email, role, is_active } },
+      });
+
       return sendSuccess(res, 'User updated successfully', user);
     } catch (err) {
       return next(err);
@@ -148,6 +179,21 @@ class UserController {
       const user = await User.findByPk(req.params.id);
       if (!user) return res.status(404).json({ message: 'User not found' });
       await user.update({ is_active: !user.is_active });
+
+      auditService.logEvent({
+        action: 'UPDATE',
+        entityType: 'USER',
+        entityId: String(user.id),
+        entityTitle: `${user.name} (${user.role})`,
+        summary: `User account status changed to ${user.is_active ? 'ACTIVE' : 'INACTIVE'} for "${user.name}".`,
+        actorId: req.user?.id,
+        actorName: req.user?.name,
+        actorEmail: req.user?.email,
+        actorRole: req.user?.role,
+        ipAddress: req.ip || '127.0.0.1',
+        severity: user.is_active ? 'SUCCESS' : 'WARNING',
+      });
+
       return sendSuccess(res, `User ${user.is_active ? 'activated' : 'deactivated'} successfully`, user);
     } catch (err) {
       return next(err);
@@ -166,6 +212,20 @@ class UserController {
       const password_hash = await User.hashPassword(new_password);
       await user.update({ password_hash });
 
+      auditService.logEvent({
+        action: 'SECURITY',
+        entityType: 'USER',
+        entityId: String(user.id),
+        entityTitle: `${user.name} (${user.role})`,
+        summary: `Administrative password reset executed for "${user.name}".`,
+        actorId: req.user?.id,
+        actorName: req.user?.name,
+        actorEmail: req.user?.email,
+        actorRole: req.user?.role,
+        ipAddress: req.ip || '127.0.0.1',
+        severity: 'WARNING',
+      });
+
       return sendSuccess(res, 'Password reset successfully');
     } catch (err) {
       return next(err);
@@ -180,6 +240,21 @@ class UserController {
       const user = await User.findByPk(req.params.id);
       if (!user) return res.status(404).json({ message: 'User not found' });
       await user.destroy(); // paranoid soft-delete
+
+      auditService.logEvent({
+        action: 'DELETE',
+        entityType: 'USER',
+        entityId: String(user.id),
+        entityTitle: `${user.name} (${user.role})`,
+        summary: `User account "${user.name}" soft-deleted from system.`,
+        actorId: req.user?.id,
+        actorName: req.user?.name,
+        actorEmail: req.user?.email,
+        actorRole: req.user?.role,
+        ipAddress: req.ip || '127.0.0.1',
+        severity: 'WARNING',
+      });
+
       return sendSuccess(res, 'User deleted successfully');
     } catch (err) {
       return next(err);

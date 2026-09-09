@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -10,21 +10,100 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
-  Sparkles,
   Shield,
   ShieldCheck,
-  Briefcase,
-  KeyRound,
   History,
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { useAuth } from '../../hooks/useAuth';
+import { userService } from '../../services/userService';
+import { leadService } from '../../services/leadService';
+import { bookingService } from '../../services/bookingService';
+import { propertyService } from '../../services/propertyService';
 
 export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
+  const location = useLocation();
   const { leads, bookings, units, currentUser, employees = [], roles = [] } = useCrm();
   const { user } = useAuth();
   const activeUser = user || currentUser;
   const isAdmin = activeUser?.role === 'ADMIN';
+
+  // Live counts from backend API (overrides stale localStorage mock data)
+  const [liveCounts, setLiveCounts] = useState({
+    leads: null,
+    bookings: null,
+    units: null,
+    users: null,
+    roles: null,
+  });
+
+  useEffect(() => {
+    const fetchCounts = async () => {
+      try {
+        const results = await Promise.allSettled([
+          leadService.getLeads({ limit: 1 }),
+          bookingService.getBookings({ limit: 1 }),
+          // Fetch units to count AVAILABLE ones
+          import('../../services/api').then((m) => m.default.get('/units', { params: { limit: 500 } })),
+          userService.getUsers({ limit: 1 }),
+          userService.getRoles(),
+        ]);
+
+        const [leadsRes, bookingsRes, unitsRes, usersRes, rolesRes] = results;
+
+        // Leads: total active pipeline count
+        const leadsTotal =
+          leadsRes.status === 'fulfilled'
+            ? (leadsRes.value?.pagination?.total ?? leadsRes.value?.leads?.length ?? null)
+            : null;
+
+        // Bookings: total count
+        const bookingsTotal =
+          bookingsRes.status === 'fulfilled'
+            ? (bookingsRes.value?.pagination?.total ?? bookingsRes.value?.bookings?.length ?? null)
+            : null;
+
+        // Units: count of AVAILABLE status
+        let availableUnits = null;
+        if (unitsRes.status === 'fulfilled') {
+          const unitsData = unitsRes.value;
+          const allUnits = unitsData?.units || unitsData?.data || (Array.isArray(unitsData) ? unitsData : []);
+          availableUnits = allUnits.filter((u) => u.status === 'AVAILABLE').length;
+        }
+
+        // Users:
+        let usersTotal = null;
+        if (usersRes.status === 'fulfilled') {
+          const uVal = usersRes.value;
+          usersTotal =
+            uVal?.pagination?.total ??
+            uVal?.users?.length ??
+            (Array.isArray(uVal) ? uVal.length : null);
+        }
+
+        // Roles:
+        let rolesTotal = null;
+        if (rolesRes.status === 'fulfilled') {
+          const rVal = rolesRes.value;
+          rolesTotal = Array.isArray(rVal)
+            ? rVal.length
+            : (rVal?.data?.length ?? rVal?.pagination?.total ?? null);
+        }
+
+        setLiveCounts({
+          leads: leadsTotal,
+          bookings: bookingsTotal,
+          units: availableUnits,
+          users: usersTotal,
+          roles: rolesTotal,
+        });
+      } catch (err) {
+        console.warn('Failed to fetch live sidebar counts:', err);
+      }
+    };
+
+    fetchCounts();
+  }, [location.pathname]);
 
   const getInitials = (name) => {
     if (!name) return 'U';
@@ -36,10 +115,25 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
       .toUpperCase();
   };
 
-  const location = useLocation();
+  // Use live API count when available, fall back to CrmContext count
+  const activeLeadsCount =
+    liveCounts.leads !== null
+      ? liveCounts.leads
+      : (leads || []).filter((l) => l.stage !== 'BOOKED' && l.stage !== 'LOST').length;
 
-  const activeLeadsCount = (leads || []).filter((l) => l.stage !== 'BOOKED' && l.stage !== 'LOST').length;
-  const availableUnitsCount = (units || []).filter((u) => u.status === 'AVAILABLE').length;
+  const availableUnitsCount =
+    liveCounts.units !== null
+      ? liveCounts.units
+      : (units || []).filter((u) => u.status === 'AVAILABLE').length;
+
+  const bookingsCount =
+    liveCounts.bookings !== null ? liveCounts.bookings : (bookings || []).length;
+
+  const usersCount =
+    liveCounts.users !== null ? liveCounts.users : (employees || []).length;
+
+  const rolesCount =
+    liveCounts.roles !== null ? liveCounts.roles : (roles || []).length;
 
   const pipelineNavItems = [
     {
@@ -69,7 +163,7 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
       to: '/bookings',
       label: 'Bookings',
       icon: BookmarkCheck,
-      badge: (bookings || []).length,
+      badge: bookingsCount,
     },
   ];
 
@@ -78,13 +172,13 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
       to: '/users',
       label: 'User Management',
       icon: UserCheck,
-      badge: (employees || []).length,
+      badge: usersCount,
     },
     {
       to: '/roles',
       label: 'Roles Master',
       icon: ShieldCheck,
-      badge: (roles || []).length,
+      badge: rolesCount,
     },
     {
       to: '/audit',

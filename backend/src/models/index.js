@@ -7,6 +7,7 @@ const { initLeadModel } = require('./Lead');
 const { initLeadNoteModel } = require('./LeadNote');
 const { initLeadFollowupModel } = require('./LeadFollowup');
 const { initBookingModel } = require('./Booking');
+const { initAuditLogModel } = require('./AuditLog');
 
 // 1. Initialize Models with Database Connection
 const User = initUserModel(sequelize);
@@ -17,6 +18,7 @@ const Lead = initLeadModel(sequelize);
 const LeadNote = initLeadNoteModel(sequelize);
 const LeadFollowup = initLeadFollowupModel(sequelize);
 const Booking = initBookingModel(sequelize);
+const AuditLog = initAuditLogModel(sequelize);
 
 // 2. Define Associations
 
@@ -129,6 +131,16 @@ User.hasMany(Booking, {
   as: 'bookings',
 });
 
+// G. AuditLog <-> User
+AuditLog.belongsTo(User, {
+  foreignKey: 'actor_id',
+  as: 'actorUser',
+});
+User.hasMany(AuditLog, {
+  foreignKey: 'actor_id',
+  as: 'auditLogs',
+});
+
 module.exports = {
   sequelize,
   User,
@@ -139,4 +151,5 @@ module.exports = {
   LeadNote,
   LeadFollowup,
   Booking,
+  AuditLog,
 };

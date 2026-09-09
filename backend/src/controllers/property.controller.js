@@ -8,7 +8,7 @@ class PropertyController {
 
   async createProject(req, res, next) {
     try {
-      const project = await propertyService.createProject(req.body);
+      const project = await propertyService.createProject(req.body, req.user);
       return sendCreated(res, 'Project created successfully', { project });
     } catch (error) {
       return next(error);
@@ -35,7 +35,7 @@ class PropertyController {
 
   async updateProject(req, res, next) {
     try {
-      const project = await propertyService.updateProject(req.params.id, req.body);
+      const project = await propertyService.updateProject(req.params.id, req.body, req.user);
       return sendSuccess(res, 'Project updated successfully', { project });
     } catch (error) {
       return next(error);
@@ -44,7 +44,7 @@ class PropertyController {
 
   async deleteProject(req, res, next) {
     try {
-      await propertyService.deleteProject(req.params.id);
+      await propertyService.deleteProject(req.params.id, req.user);
       return sendSuccess(res, 'Project deleted successfully', null);
     } catch (error) {
       return next(error);
@@ -114,7 +114,7 @@ class PropertyController {
         ...req.body,
         building_id: parseInt(req.params.buildingId || req.body.building_id, 10),
       };
-      const unit = await propertyService.createUnit(unitData);
+      const unit = await propertyService.createUnit(unitData, req.user);
       return sendCreated(res, 'Unit created successfully', { unit });
     } catch (error) {
       return next(error);
@@ -141,7 +141,7 @@ class PropertyController {
 
   async updateUnit(req, res, next) {
     try {
-      const unit = await propertyService.updateUnit(req.params.id, req.body);
+      const unit = await propertyService.updateUnit(req.params.id, req.body, req.user);
       return sendSuccess(res, 'Unit updated successfully', { unit });
     } catch (error) {
       return next(error);
@@ -150,7 +150,7 @@ class PropertyController {
 
   async deleteUnit(req, res, next) {
     try {
-      await propertyService.deleteUnit(req.params.id);
+      await propertyService.deleteUnit(req.params.id, req.user);
       return sendSuccess(res, 'Unit deleted successfully', null);
     } catch (error) {
       return next(error);
