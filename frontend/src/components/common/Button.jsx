@@ -36,6 +36,13 @@ export const Button = React.forwardRef(
     const variantClasses = variants[variant] || variants.primary;
     const sizeClasses = sizes[size] || sizes.md;
 
+    const renderIcon = (icon) => {
+      if (!icon) return null;
+      if (React.isValidElement(icon)) return icon;
+      const IconComponent = icon;
+      return <IconComponent className="w-4 h-4 shrink-0" />;
+    };
+
     return (
       <button
         ref={ref}
@@ -47,10 +54,10 @@ export const Button = React.forwardRef(
         {isLoading ? (
           <Loader2 className="w-4 h-4 animate-spin text-current" />
         ) : (
-          LeftIcon && <LeftIcon className="w-4 h-4 shrink-0" />
+          renderIcon(LeftIcon)
         )}
         <span>{children}</span>
-        {!isLoading && RightIcon && <RightIcon className="w-4 h-4 shrink-0" />}
+        {!isLoading && renderIcon(RightIcon)}
       </button>
     );
   }
