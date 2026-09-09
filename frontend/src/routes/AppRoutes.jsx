@@ -2,6 +2,7 @@ import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import AuthLayout from '../layouts/AuthLayout';
+import ProtectedRoute from './ProtectedRoute';
 import Loader from '../components/common/Loader';
 
 // Lazy-loaded pages for optimal bundle splitting
@@ -27,14 +28,20 @@ export function AppRoutes() {
   return (
     <Suspense fallback={<Loader fullPage text="Loading CRM Application..." />}>
       <Routes>
-        {/* Public Authentication Pages (Optional mock) */}
+        {/* Public Authentication Pages */}
         <Route element={<AuthLayout />}>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
         </Route>
 
-        {/* Real Estate CRM Main Application Routes */}
-        <Route element={<MainLayout />}>
+        {/* Protected Real Estate CRM Main Application Routes */}
+        <Route
+          element={
+            <ProtectedRoute>
+              <MainLayout />
+            </ProtectedRoute>
+          }
+        >
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
 

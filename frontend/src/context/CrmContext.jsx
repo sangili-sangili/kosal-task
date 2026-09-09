@@ -58,10 +58,18 @@ export function CrmProvider({ children }) {
     return saved ? JSON.parse(saved) : INITIAL_AUDIT_LOGS;
   });
 
-  // 8. Active Mock User (Sangili S or Arun Kumar)
+  // 8. Active Authenticated User (Synced with backend JWT session)
   const [currentUser, setCurrentUser] = useState(() => {
-    const saved = localStorage.getItem('crm_current_user');
-    return saved ? JSON.parse(saved) : EMPLOYEES[3] || EMPLOYEES[0];
+    try {
+      const saved = localStorage.getItem('user') || localStorage.getItem('crm_current_user');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      id: 1,
+      name: 'System Administrator',
+      email: 'admin@crm.com',
+      role: 'ADMIN',
+    };
   });
 
   // Persist state changes

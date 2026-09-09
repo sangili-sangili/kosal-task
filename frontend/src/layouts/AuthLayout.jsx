@@ -10,10 +10,10 @@ export function AuthLayout() {
           <Building2 className="w-7 h-7" />
         </div>
         <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-          Enterprise SaaS Portal
+          Real Estate CRM Portal
         </h2>
         <p className="mt-2 text-sm text-slate-400">
-          High-performance, secure enterprise architecture
+          Intelligent Lead Pipeline & Unit Inventory Management
         </p>
       </div>
 

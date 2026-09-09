@@ -3,13 +3,22 @@ import { authService } from '../../services/authService';
 import { addToast } from './notificationSlice';
 
 // Safely restore initial auth state from localStorage
-const storedUser = localStorage.getItem('user');
+const getStoredUser = () => {
+  try {
+    const saved = localStorage.getItem('user');
+    return saved ? JSON.parse(saved) : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const storedUser = getStoredUser();
 const storedToken = localStorage.getItem('token');
 
 const initialState = {
-  user: storedUser ? JSON.parse(storedUser) : null,
+  user: storedUser,
   token: storedToken || null,
-  isAuthenticated: Boolean(storedToken),
+  isAuthenticated: Boolean(storedToken && storedUser),
   isLoading: false,
   error: null,
 };
@@ -19,14 +28,14 @@ export const loginUser = createAsyncThunk(
   async (credentials, { dispatch, rejectWithValue }) => {
     try {
       const response = await authService.login(credentials);
-      const { user, tokens } = response.data;
+      const { user, token } = response.data;
 
-      localStorage.setItem('token', tokens.accessToken);
-      localStorage.setItem('refreshToken', tokens.refreshToken);
+      localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
+      localStorage.setItem('crm_current_user', JSON.stringify(user));
 
-      dispatch(addToast({ type: 'success', message: `Welcome back, ${user.firstName}!` }));
-      return { user, token: tokens.accessToken };
+      dispatch(addToast({ type: 'success', message: `Welcome back, ${user.name}!` }));
+      return { user, token };
     } catch (error) {
       dispatch(addToast({ type: 'error', message: error.message || 'Login failed' }));
       return rejectWithValue(error.message || 'Invalid credentials');
@@ -52,8 +61,11 @@ export const logoutUser = createAsyncThunk('auth/logoutUser', async (_, { dispat
   try {
     await authService.logout();
   } catch (e) {
-    // Ignore logout failure
+    // Ignore logout API network failure
   } finally {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('crm_current_user');
     dispatch(addToast({ type: 'info', message: 'You have been signed out.' }));
   }
 });
@@ -63,8 +75,10 @@ export const fetchUserProfile = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       const response = await authService.getProfile();
-      localStorage.setItem('user', JSON.stringify(response.data));
-      return response.data;
+      const user = response.data?.user || response.data;
+      localStorage.setItem('user', JSON.stringify(user));
+      localStorage.setItem('crm_current_user', JSON.stringify(user));
+      return user;
     } catch (error) {
       return rejectWithValue(error.message);
     }
@@ -77,6 +91,9 @@ const authSlice = createSlice({
   reducers: {
     clearAuthError: (state) => {
       state.error = null;
+    },
+    syncUserState: (state, action) => {
+      state.user = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -126,13 +143,11 @@ const authSlice = createSlice({
   },
 });
 
-export const { clearAuthError } = authSlice.actions;
+export const { clearAuthError, syncUserState } = authSlice.actions;
 
 export const selectCurrentUser = (state) => state.auth.user;
 export const selectIsAuthenticated = (state) => state.auth.isAuthenticated;
 export const selectAuthLoading = (state) => state.auth.isLoading;
 export const selectAuthError = (state) => state.auth.error;
-export const selectUserRoles = (state) => state.auth.user?.roles || [];
-export const selectUserPermissions = (state) => state.auth.user?.permissions || [];
 
 export default authSlice.reducer;

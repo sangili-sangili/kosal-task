@@ -18,9 +18,24 @@ import {
   History,
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
+import { useAuth } from '../../hooks/useAuth';
 
 export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
-  const { leads, bookings, units, currentUser, setCurrentUser, employees, roles = [] } = useCrm();
+  const { leads, bookings, units, currentUser, roles = [] } = useCrm();
+  const { user } = useAuth();
+  const activeUser = user || currentUser;
+  const isAdmin = activeUser?.role === 'ADMIN';
+
+  const getInitials = (name) => {
+    if (!name) return 'U';
+    return name
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .substring(0, 2)
+      .toUpperCase();
+  };
+
   const location = useLocation();
 
   const activeLeadsCount = (leads || []).filter((l) => l.stage !== 'BOOKED' && l.stage !== 'LOST').length;
@@ -183,95 +198,84 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
               </nav>
             </div>
 
-            {/* 2. Administration & Security Master Section */}
-            <div>
-              {!isCollapsed && (
-                <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-                  Access & Security Master
-                </p>
-              )}
+            {/* 2. Administration & Security Master Section (Admin Only) */}
+            {isAdmin && (
+              <div>
+                {!isCollapsed && (
+                  <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                    Access & Security Master
+                  </p>
+                )}
 
-              <nav className="space-y-1">
-                {adminNavItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive =
-                    location.pathname === item.to || location.pathname.startsWith(item.to);
+                <nav className="space-y-1">
+                  {adminNavItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive =
+                      location.pathname === item.to || location.pathname.startsWith(item.to);
 
-                  return (
-                    <NavLink
-                      key={item.to}
-                      to={item.to}
-                      onClick={() => {
-                        if (window.innerWidth < 1024) onClose();
-                      }}
-                      title={isCollapsed ? item.label : undefined}
-                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-colors group ${
-                        isActive
-                          ? 'bg-brand-600 text-white font-semibold shadow-subtle'
-                          : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
-                      } ${isCollapsed ? 'justify-center px-2' : ''}`}
-                    >
-                      <Icon className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
-                      {!isCollapsed && (
-                        <>
-                          <span className="truncate flex-1">{item.label}</span>
-                          {item.badge !== undefined && (
-                            <span
-                              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
-                              }`}
-                            >
-                              {item.badge}
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </NavLink>
-                  );
-                })}
-              </nav>
-            </div>
+                    return (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        onClick={() => {
+                          if (window.innerWidth < 1024) onClose();
+                        }}
+                        title={isCollapsed ? item.label : undefined}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-colors group ${
+                          isActive
+                            ? 'bg-brand-600 text-white font-semibold shadow-subtle'
+                            : 'text-slate-400 hover:bg-slate-800/80 hover:text-slate-200'
+                        } ${isCollapsed ? 'justify-center px-2' : ''}`}
+                      >
+                        <Icon className="w-4 h-4 shrink-0 transition-transform group-hover:scale-105" />
+                        {!isCollapsed && (
+                          <>
+                            <span className="truncate flex-1">{item.label}</span>
+                            {item.badge !== undefined && (
+                              <span
+                                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                  isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
+                                }`}
+                              >
+                                {item.badge}
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </NavLink>
+                    );
+                  })}
+                </nav>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Bottom Section: Active Persona Switcher & Desktop Collapse Toggle */}
+        {/* Bottom Section: Active Persona & Desktop Collapse Toggle */}
         <div className="p-3 border-t border-slate-800/80 bg-slate-950/30 space-y-2">
           {/* User Persona Card */}
-          <div className={`p-2 rounded-xl bg-slate-800/60 border border-slate-700/60 ${isCollapsed ? 'text-center' : ''}`}>
+          <div className={`p-2.5 rounded-xl bg-slate-800/60 border border-slate-700/60 ${isCollapsed ? 'text-center' : ''}`}>
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-full bg-brand-500/20 text-brand-300 border border-brand-400/30 flex items-center justify-center text-xs font-bold shrink-0">
-                {currentUser.avatar}
+                {getInitials(activeUser?.name)}
               </div>
               {!isCollapsed && (
                 <div className="flex-1 truncate text-left">
-                  <div className="text-xs font-semibold text-white truncate">{currentUser.name}</div>
-                  <div className="text-[10px] text-slate-400 truncate flex items-center gap-1">
+                  <div className="text-xs font-semibold text-white truncate">{activeUser?.name || 'User'}</div>
+                  <div className="text-[10px] text-slate-400 truncate flex items-center gap-1 mt-0.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-                    {currentUser.title}
+                    <span>{activeUser?.role === 'ADMIN' ? 'System Admin' : 'Sales Representative'}</span>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Quick Persona Switcher for demonstration */}
             {!isCollapsed && (
-              <div className="mt-2 pt-2 border-t border-slate-700/50 flex items-center justify-between text-[11px] text-slate-400">
-                <span>Role: <strong className="text-slate-200">{currentUser.role}</strong></span>
-                <select
-                  value={currentUser.id}
-                  onChange={(e) => {
-                    const selected = employees.find((emp) => emp.id === e.target.value);
-                    if (selected) setCurrentUser(selected);
-                  }}
-                  className="bg-slate-900 border border-slate-700 text-slate-300 text-[10px] rounded px-1.5 py-0.5 focus:outline-none"
-                  aria-label="Switch mock user"
-                >
-                  {employees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.name} ({emp.role})
-                    </option>
-                  ))}
-                </select>
+              <div className="mt-2 pt-2 border-t border-slate-700/50 flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                <span className="truncate text-slate-400">{activeUser?.email}</span>
+                <span className="px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/40 text-[9px] font-semibold uppercase tracking-wider">
+                  LIVE
+                </span>
               </div>
             )}
           </div>
