@@ -28,7 +28,14 @@ export const loginUser = createAsyncThunk(
   async (credentials, { dispatch, rejectWithValue }) => {
     try {
       const response = await authService.login(credentials);
-      const { user, token } = response.data;
+      // Support both unboxed { user, token } and wrapped { data: { user, token } }
+      const payload = response?.user && response?.token ? response : (response?.data || response);
+      const user = payload?.user;
+      const token = payload?.token;
+
+      if (!user || !token) {
+        throw new Error('Invalid authentication response from server');
+      }
 
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
@@ -49,7 +56,7 @@ export const registerUser = createAsyncThunk(
     try {
       const response = await authService.register(userData);
       dispatch(addToast({ type: 'success', message: 'Registration successful! You may now sign in.' }));
-      return response.data;
+      return response?.data || response;
     } catch (error) {
       dispatch(addToast({ type: 'error', message: error.message || 'Registration failed' }));
       return rejectWithValue(error.message || 'Registration failed');
