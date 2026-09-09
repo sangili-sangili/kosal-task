@@ -8,9 +8,11 @@ const { initLeadNoteModel } = require('./LeadNote');
 const { initLeadFollowupModel } = require('./LeadFollowup');
 const { initBookingModel } = require('./Booking');
 const { initAuditLogModel } = require('./AuditLog');
+const { initRoleModel } = require('./Role');
 
 // 1. Initialize Models with Database Connection
 const User = initUserModel(sequelize);
+const Role = initRoleModel(sequelize);
 const Project = initProjectModel(sequelize);
 const Building = initBuildingModel(sequelize);
 const Unit = initUnitModel(sequelize);
@@ -144,6 +146,7 @@ User.hasMany(AuditLog, {
 module.exports = {
   sequelize,
   User,
+  Role,
   Project,
   Building,
   Unit,

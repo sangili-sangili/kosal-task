@@ -175,10 +175,12 @@ export function RoleManagementPage() {
       setApiRoles(roles);
       setApiUsers(users);
 
-      // Initialize permissions — use defaults
+      // Initialize permissions from database records
       const perms = {};
       roles.forEach((r) => {
-        perms[r.code] = DEFAULT_PERMISSIONS[r.code] || [];
+        perms[r.code] = Array.isArray(r.permissions) && r.permissions.length > 0
+          ? r.permissions
+          : (DEFAULT_PERMISSIONS[r.code] || []);
       });
       setRolePermissions(perms);
       if (roles.length > 0 && !selectedRoleCode) {
@@ -221,7 +223,7 @@ export function RoleManagementPage() {
     setCreateModalOpen(true);
   };
 
-  const handleCreateRole = (e) => {
+  const handleCreateRole = async (e) => {
     e.preventDefault();
     const name = newRoleForm.name.trim();
     const code = (newRoleForm.code || name).toUpperCase().replace(/[^A-Z0-9]/g, '_');
@@ -236,69 +238,68 @@ export function RoleManagementPage() {
     // Clone permissions from template role
     const templatePerms = rolePermissions[newRoleForm.templateCode] || [];
 
-    const newRole = {
-      id:          `custom_${Date.now()}`,
-      code,
-      name,
-      description: desc,
-      label:       name,
-      isSystem:    false,
-    };
-
-    setCustomRoles((prev) => [...prev, newRole]);
-    setRolePermissions((prev) => ({ ...prev, [code]: [...templatePerms] }));
-    setSelectedRoleCode(code);
-    setCreateModalOpen(false);
-    showFeedback(`Role "${name}" created with ${templatePerms.length} permissions cloned from template.`);
-
-    auditService.createAuditLog({
-      action: 'SECURITY',
-      entityType: 'ROLE',
-      entityId: code,
-      entityTitle: `${name} (${code})`,
-      summary: `New custom security profile "${name}" created with ${templatePerms.length} permissions cloned from ${newRoleForm.templateCode || 'scratch'}.`,
-      severity: 'SUCCESS',
-      details: {
+    try {
+      const created = await userService.createRole({
         code,
         name,
         description: desc,
-        clonedFrom: newRoleForm.templateCode || null,
-        permissionsCount: templatePerms.length,
-      },
-    }).catch((err) => console.error('Failed to log role creation:', err));
+        permissions: templatePerms,
+      });
+
+      const newRole = {
+        id:          created.id || `custom_${Date.now()}`,
+        code:        created.code || code,
+        name:        created.name || name,
+        description: desc,
+        label:       name,
+        isSystem:    false,
+      };
+
+      setCustomRoles((prev) => [...prev, newRole]);
+      setRolePermissions((prev) => ({ ...prev, [code]: [...templatePerms] }));
+      setSelectedRoleCode(code);
+      setCreateModalOpen(false);
+      showFeedback(`Role "${name}" created and saved to database.`);
+      window.dispatchEvent(new Event('rolePermissionsChanged'));
+    } catch (err) {
+      console.error('Failed to create role in DB:', err);
+      setNewRoleError(err?.message || 'Failed to save role to database.');
+    }
   };
 
-  const handleDeleteCustomRole = () => {
+  const handleDeleteCustomRole = async () => {
     if (!deleteModalRole) return;
     const code = deleteModalRole.code;
-    setCustomRoles((prev) => prev.filter((r) => r.code !== code));
-    setRolePermissions((prev) => { const n = { ...prev }; delete n[code]; return n; });
-    setSelectedRoleCode(allRoles.find((r) => r.code !== code)?.code || '');
-    setDeleteModalRole(null);
-    showFeedback(`Role "${deleteModalRole.name}" has been deleted.`);
-
-    auditService.createAuditLog({
-      action: 'DELETE',
-      entityType: 'ROLE',
-      entityId: deleteModalRole.code,
-      entityTitle: `${deleteModalRole.name} (${deleteModalRole.code})`,
-      summary: `Custom security role "${deleteModalRole.name}" was permanently removed.`,
-      severity: 'WARNING',
-      details: {
-        code: deleteModalRole.code,
-        name: deleteModalRole.name,
-      },
-    }).catch((err) => console.error('Failed to log role deletion:', err));
+    try {
+      await userService.deleteRole(code);
+      setCustomRoles((prev) => prev.filter((r) => r.code !== code));
+      setRolePermissions((prev) => { const n = { ...prev }; delete n[code]; return n; });
+      setSelectedRoleCode(allRoles.find((r) => r.code !== code)?.code || '');
+      setDeleteModalRole(null);
+      showFeedback(`Role "${deleteModalRole.name}" deleted from database.`);
+      window.dispatchEvent(new Event('rolePermissionsChanged'));
+    } catch (err) {
+      console.error('Failed to delete role from DB:', err);
+      showFeedback(err?.message || 'Failed to delete role', 'error');
+    }
   };
 
   // ── Permission toggle handlers ────────────────────────────────────────────────
-  const handleTogglePerm = (permId) => {
+  const handleTogglePerm = async (permId) => {
     const cur = rolePermissions[selectedRoleCode] || [];
     const next = cur.includes(permId)
       ? cur.filter((p) => p !== permId)
       : [...cur, permId];
     setRolePermissions((prev) => ({ ...prev, [selectedRoleCode]: next }));
     showSaved();
+
+    // Persist immediately to MySQL database
+    try {
+      await userService.updateRolePermissions(selectedRoleCode, next);
+      window.dispatchEvent(new Event('rolePermissionsChanged'));
+    } catch (err) {
+      console.error('Failed to update role permissions in DB:', err);
+    }
 
     auditService.createAuditLog({
       action: 'SECURITY',
@@ -314,13 +315,21 @@ export function RoleManagementPage() {
     }).catch((err) => console.error('Failed to log permission change:', err));
   };
 
-  const handleModuleToggleAll = (modulePermIds, enableAll) => {
+  const handleModuleToggleAll = async (modulePermIds, enableAll) => {
     const cur = rolePermissions[selectedRoleCode] || [];
     const next = enableAll
       ? Array.from(new Set([...cur, ...modulePermIds]))
       : cur.filter((p) => !modulePermIds.includes(p));
     setRolePermissions((prev) => ({ ...prev, [selectedRoleCode]: next }));
     showSaved();
+
+    // Persist immediately to MySQL database
+    try {
+      await userService.updateRolePermissions(selectedRoleCode, next);
+      window.dispatchEvent(new Event('rolePermissionsChanged'));
+    } catch (err) {
+      console.error('Failed to update module permissions in DB:', err);
+    }
 
     auditService.createAuditLog({
       action: 'SECURITY',

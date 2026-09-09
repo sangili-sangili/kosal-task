@@ -45,9 +45,27 @@ export const userService = {
     return res.data ?? res;
   },
 
-  /** GET /users/roles/all — available roles */
+  /** GET /users/roles/all — available roles with their permissions */
   getRoles: async () => {
     const res = await api.get('/users/roles/all');
+    return res.data ?? res;
+  },
+
+  /** PUT /users/roles/:code/permissions — update permissions for a role */
+  updateRolePermissions: async (code, permissions) => {
+    const res = await api.put(`/users/roles/${code}/permissions`, { permissions });
+    return res.data ?? res;
+  },
+
+  /** POST /users/roles — create a custom role */
+  createRole: async (roleData) => {
+    const res = await api.post('/users/roles', roleData);
+    return res.data ?? res;
+  },
+
+  /** DELETE /users/roles/:code — delete custom role */
+  deleteRole: async (code) => {
+    const res = await api.delete(`/users/roles/${code}`);
     return res.data ?? res;
   },
 };

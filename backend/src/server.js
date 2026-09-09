@@ -19,6 +19,10 @@ async function bootstrap() {
     // Verify Database Connection
     await testConnection();
 
+    // Ensure Role model is synchronized with database
+    const { Role } = require('./models');
+    await Role.sync();
+
     // Start Listening
     server.listen(env.PORT, () => {
       logger.info(`Server successfully running on port ${env.PORT} [Env: ${env.NODE_ENV}]`);

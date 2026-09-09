@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+  import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -28,7 +28,7 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
   const activeUser = user || currentUser;
   const isAdmin = activeUser?.role === 'ADMIN';
 
-  // Live counts from backend API (overrides stale localStorage mock data)
+  // Live counts and roles data from backend API
   const [liveCounts, setLiveCounts] = useState({
     leads: null,
     bookings: null,
@@ -36,74 +36,82 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
     users: null,
     roles: null,
   });
+  const [rolesList, setRolesList] = useState([]);
+
+  const fetchCounts = async () => {
+    try {
+      const results = await Promise.allSettled([
+        leadService.getLeads({ limit: 1 }),
+        bookingService.getBookings({ limit: 1 }),
+        // Fetch units to count AVAILABLE ones
+        import('../../services/api').then((m) => m.default.get('/units', { params: { limit: 500 } })),
+        userService.getUsers({ limit: 1 }),
+        userService.getRoles(),
+      ]);
+
+      const [leadsRes, bookingsRes, unitsRes, usersRes, rolesRes] = results;
+
+      // Leads: total active pipeline count
+      const leadsTotal =
+        leadsRes.status === 'fulfilled'
+          ? (leadsRes.value?.pagination?.total ?? leadsRes.value?.leads?.length ?? null)
+          : null;
+
+      // Bookings: total count
+      const bookingsTotal =
+        bookingsRes.status === 'fulfilled'
+          ? (bookingsRes.value?.pagination?.total ?? bookingsRes.value?.bookings?.length ?? null)
+          : null;
+
+      // Units: count of AVAILABLE status
+      let availableUnits = null;
+      if (unitsRes.status === 'fulfilled') {
+        const unitsData = unitsRes.value;
+        const allUnits = unitsData?.units || unitsData?.data || (Array.isArray(unitsData) ? unitsData : []);
+        availableUnits = allUnits.filter((u) => u.status === 'AVAILABLE').length;
+      }
+
+      // Users:
+      let usersTotal = null;
+      if (usersRes.status === 'fulfilled') {
+        const uVal = usersRes.value;
+        usersTotal =
+          uVal?.pagination?.total ??
+          uVal?.users?.length ??
+          (Array.isArray(uVal) ? uVal.length : null);
+      }
+
+      // Roles & live permissions from database
+      let rolesTotal = null;
+      if (rolesRes.status === 'fulfilled') {
+        const rVal = rolesRes.value;
+        const list = Array.isArray(rVal) ? rVal : (rVal?.data || []);
+        setRolesList(list);
+        rolesTotal = list.length;
+      }
+
+      setLiveCounts({
+        leads: leadsTotal,
+        bookings: bookingsTotal,
+        units: availableUnits,
+        users: usersTotal,
+        roles: rolesTotal,
+      });
+    } catch (err) {
+      console.warn('Failed to fetch live sidebar counts:', err);
+    }
+  };
 
   useEffect(() => {
-    const fetchCounts = async () => {
-      try {
-        const results = await Promise.allSettled([
-          leadService.getLeads({ limit: 1 }),
-          bookingService.getBookings({ limit: 1 }),
-          // Fetch units to count AVAILABLE ones
-          import('../../services/api').then((m) => m.default.get('/units', { params: { limit: 500 } })),
-          userService.getUsers({ limit: 1 }),
-          userService.getRoles(),
-        ]);
-
-        const [leadsRes, bookingsRes, unitsRes, usersRes, rolesRes] = results;
-
-        // Leads: total active pipeline count
-        const leadsTotal =
-          leadsRes.status === 'fulfilled'
-            ? (leadsRes.value?.pagination?.total ?? leadsRes.value?.leads?.length ?? null)
-            : null;
-
-        // Bookings: total count
-        const bookingsTotal =
-          bookingsRes.status === 'fulfilled'
-            ? (bookingsRes.value?.pagination?.total ?? bookingsRes.value?.bookings?.length ?? null)
-            : null;
-
-        // Units: count of AVAILABLE status
-        let availableUnits = null;
-        if (unitsRes.status === 'fulfilled') {
-          const unitsData = unitsRes.value;
-          const allUnits = unitsData?.units || unitsData?.data || (Array.isArray(unitsData) ? unitsData : []);
-          availableUnits = allUnits.filter((u) => u.status === 'AVAILABLE').length;
-        }
-
-        // Users:
-        let usersTotal = null;
-        if (usersRes.status === 'fulfilled') {
-          const uVal = usersRes.value;
-          usersTotal =
-            uVal?.pagination?.total ??
-            uVal?.users?.length ??
-            (Array.isArray(uVal) ? uVal.length : null);
-        }
-
-        // Roles:
-        let rolesTotal = null;
-        if (rolesRes.status === 'fulfilled') {
-          const rVal = rolesRes.value;
-          rolesTotal = Array.isArray(rVal)
-            ? rVal.length
-            : (rVal?.data?.length ?? rVal?.pagination?.total ?? null);
-        }
-
-        setLiveCounts({
-          leads: leadsTotal,
-          bookings: bookingsTotal,
-          units: availableUnits,
-          users: usersTotal,
-          roles: rolesTotal,
-        });
-      } catch (err) {
-        console.warn('Failed to fetch live sidebar counts:', err);
-      }
-    };
-
     fetchCounts();
   }, [location.pathname]);
+
+  // Re-fetch when role permissions are modified in Roles Master
+  useEffect(() => {
+    const handlePermChange = () => fetchCounts();
+    window.addEventListener('rolePermissionsChanged', handlePermChange);
+    return () => window.removeEventListener('rolePermissionsChanged', handlePermChange);
+  }, []);
 
   const getInitials = (name) => {
     if (!name) return 'U';
@@ -113,6 +121,18 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
       .join('')
       .substring(0, 2)
       .toUpperCase();
+  };
+
+  // Check permissions against database role definitions
+  const currentRoleCode = activeUser?.role || 'SALES';
+  const currentRoleObj = rolesList.find((r) => r.code === currentRoleCode);
+  const currentPermissions = currentRoleObj?.permissions || (isAdmin ? ['*'] : []);
+
+  const hasPermission = (permissionKey) => {
+    if (isAdmin) return true;
+    if (!permissionKey) return true;
+    if (currentPermissions.includes('*')) return true;
+    return currentPermissions.includes(permissionKey);
   };
 
   // Use live API count when available, fall back to CrmContext count
@@ -140,17 +160,20 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
       to: '/dashboard',
       label: 'Dashboard',
       icon: LayoutDashboard,
+      permission: 'dashboard:view',
     },
     {
       to: '/leads',
       label: 'Leads',
       icon: Users,
       badge: activeLeadsCount,
+      permission: 'customer:read',
     },
     {
       to: '/properties',
       label: 'Properties',
       icon: Building2,
+      permission: 'property:read',
     },
     {
       to: '/units',
@@ -158,12 +181,14 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
       icon: Layers,
       badge: `${availableUnitsCount} Avail`,
       badgeVariant: 'success',
+      permission: 'property:read',
     },
     {
       to: '/bookings',
       label: 'Bookings',
       icon: BookmarkCheck,
       badge: bookingsCount,
+      permission: 'transaction:read',
     },
   ];
 
@@ -173,12 +198,14 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
       label: 'User Management',
       icon: UserCheck,
       badge: usersCount,
+      permission: 'user:read',
     },
     {
       to: '/roles',
       label: 'Roles Master',
       icon: ShieldCheck,
       badge: rolesCount,
+      permission: 'role:read',
     },
     {
       to: '/audit',
@@ -186,8 +213,12 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
       icon: History,
       badge: 'Live',
       badgeVariant: 'success',
+      permission: 'audit:read',
     },
   ];
+
+  const visiblePipelineNav = pipelineNavItems.filter((item) => hasPermission(item.permission));
+  const visibleAdminNav = adminNavItems.filter((item) => hasPermission(item.permission));
 
   return (
     <>
@@ -247,7 +278,7 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
               )}
 
               <nav className="space-y-1">
-                {pipelineNavItems.map((item) => {
+                {visiblePipelineNav.map((item) => {
                   const Icon = item.icon;
                   const isActive =
                     location.pathname === item.to ||
@@ -292,8 +323,8 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
               </nav>
             </div>
 
-            {/* 2. Administration & Security Master Section (Admin Only) */}
-            {isAdmin && (
+            {/* 2. Access & Security Master Section (Shown dynamically when user has granted permissions) */}
+            {visibleAdminNav.length > 0 && (
               <div>
                 {!isCollapsed && (
                   <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
@@ -302,7 +333,7 @@ export function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
                 )}
 
                 <nav className="space-y-1">
-                  {adminNavItems.map((item) => {
+                  {visibleAdminNav.map((item) => {
                     const Icon = item.icon;
                     const isActive =
                       location.pathname === item.to || location.pathname.startsWith(item.to);

@@ -1,5 +1,5 @@
 const userRepository = require('../repositories/user.repository');
-const { User } = require('../models');
+const { User, Role } = require('../models');
 const { sendSuccess } = require('../utils/response');
 const { ROLES } = require('../constants/roles');
 const { Op } = require('sequelize');
@@ -262,16 +262,177 @@ class UserController {
   }
 
   /**
-   * GET /users/roles/all — list available role options
+   * GET /users/roles/all — list all roles with their live database permissions
    */
   async getRoles(req, res, next) {
     try {
-      const roleList = Object.values(ROLES).map((r) => ({
-        code:  r,
-        name:  r === ROLES.ADMIN ? 'Administrator' : 'Sales Executive',
-        label: r,
+      let roles = await Role.findAll({ order: [['id', 'ASC']] });
+      if (!roles || roles.length === 0) {
+        const allPerms = Object.values(require('../constants/permissions').PERMISSIONS);
+        const adminRole = await Role.create({
+          code: 'ADMIN',
+          name: 'Administrator',
+          description: 'System Administrator with unrestricted access',
+          permissions: allPerms,
+          is_system: true,
+        });
+        const salesRole = await Role.create({
+          code: 'SALES',
+          name: 'Sales Executive',
+          description: 'Sales representative handling prospect leads and unit bookings',
+          permissions: [
+            'dashboard:view', 'customer:read', 'customer:create', 'customer:update',
+            'property:read', 'transaction:read', 'transaction:create', 'booking:update'
+          ],
+          is_system: true,
+        });
+        roles = [adminRole, salesRole];
+      }
+
+      const roleList = roles.map((r) => ({
+        id:          r.id,
+        code:        r.code,
+        name:        r.name,
+        description: r.description,
+        permissions: r.permissions || [],
+        isSystem:    Boolean(r.is_system),
+        label:       r.name,
       }));
+
       return sendSuccess(res, 'Roles retrieved', roleList);
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  /**
+   * PUT /users/roles/:code/permissions — update permissions for a role in MySQL
+   */
+  async updateRolePermissions(req, res, next) {
+    try {
+      const { code } = req.params;
+      const { permissions } = req.body;
+
+      if (!Array.isArray(permissions)) {
+        return res.status(400).json({ success: false, message: 'Permissions must be an array of permission IDs' });
+      }
+
+      const role = await Role.findOne({ where: { code: code.toUpperCase() } });
+      if (!role) {
+        return res.status(404).json({ success: false, message: `Role '${code}' not found` });
+      }
+
+      role.permissions = permissions;
+      await role.save();
+
+      auditService.logEvent({
+        action: 'SECURITY',
+        entityType: 'ROLE',
+        entityId: role.code,
+        entityTitle: `${role.name} (${role.code})`,
+        summary: `Updated access permissions for role "${role.name}". Active permissions: ${permissions.length}.`,
+        actorId: req.user?.id,
+        actorName: req.user?.name,
+        actorEmail: req.user?.email,
+        actorRole: req.user?.role,
+        severity: 'INFO',
+        details: {
+          role: role.code,
+          permissionsCount: permissions.length,
+          permissions,
+        },
+      });
+
+      return sendSuccess(res, `Permissions for role '${role.name}' updated successfully`, {
+        code: role.code,
+        name: role.name,
+        permissions: role.permissions,
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  /**
+   * POST /users/roles — create a custom security role in MySQL
+   */
+  async createRole(req, res, next) {
+    try {
+      const { code, name, description, permissions } = req.body;
+      if (!name) {
+        return res.status(400).json({ success: false, message: 'Role name is required' });
+      }
+      const roleCode = (code || name).toUpperCase().replace(/[^A-Z0-9]/g, '_');
+
+      const existing = await Role.findOne({ where: { code: roleCode } });
+      if (existing) {
+        return res.status(400).json({ success: false, message: `Role code '${roleCode}' already exists` });
+      }
+
+      const role = await Role.create({
+        code: roleCode,
+        name: name.trim(),
+        description: description?.trim() || 'Custom organizational role',
+        permissions: Array.isArray(permissions) ? permissions : [],
+        is_system: false,
+      });
+
+      auditService.logEvent({
+        action: 'CREATE',
+        entityType: 'ROLE',
+        entityId: role.code,
+        entityTitle: `${role.name} (${role.code})`,
+        summary: `Created custom security role "${role.name}" with ${role.permissions.length} permissions.`,
+        actorId: req.user?.id,
+        actorName: req.user?.name,
+        actorEmail: req.user?.email,
+        actorRole: req.user?.role,
+        severity: 'SUCCESS',
+      });
+
+      return sendSuccess(res, 'Role created successfully', {
+        id: role.id,
+        code: role.code,
+        name: role.name,
+        description: role.description,
+        permissions: role.permissions,
+        isSystem: false,
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+
+  /**
+   * DELETE /users/roles/:code — delete a custom role from MySQL
+   */
+  async deleteRole(req, res, next) {
+    try {
+      const { code } = req.params;
+      const role = await Role.findOne({ where: { code: code.toUpperCase() } });
+      if (!role) {
+        return res.status(404).json({ success: false, message: 'Role not found' });
+      }
+      if (role.is_system) {
+        return res.status(400).json({ success: false, message: 'Cannot delete built-in system role' });
+      }
+
+      await role.destroy();
+
+      auditService.logEvent({
+        action: 'DELETE',
+        entityType: 'ROLE',
+        entityId: role.code,
+        entityTitle: `${role.name} (${role.code})`,
+        summary: `Deleted custom security role "${role.name}".`,
+        actorId: req.user?.id,
+        actorName: req.user?.name,
+        actorEmail: req.user?.email,
+        actorRole: req.user?.role,
+        severity: 'WARNING',
+      });
+
+      return sendSuccess(res, `Role '${role.name}' deleted successfully`);
     } catch (err) {
       return next(err);
     }

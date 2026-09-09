@@ -6,8 +6,11 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
-// GET  /api/v1/users/roles/all  — must be before /:id to avoid param collision
+// Role & Permissions Master API (must be before /:id to avoid param collision)
 router.get('/roles/all', (req, res, next) => userController.getRoles(req, res, next));
+router.put('/roles/:code/permissions', (req, res, next) => userController.updateRolePermissions(req, res, next));
+router.post('/roles', (req, res, next) => userController.createRole(req, res, next));
+router.delete('/roles/:code', (req, res, next) => userController.deleteRole(req, res, next));
 
 // GET    /api/v1/users           — paginated list with filters
 router.get('/',     (req, res, next) => userController.list(req, res, next));
