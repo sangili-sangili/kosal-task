@@ -266,13 +266,21 @@ export function LeadListPage() {
           onClick={() => navigate(`/leads/${row.id}`)}
           className="cursor-pointer group flex items-center gap-3 text-left py-0.5"
         >
-          <div
-            className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${getAvatarGradient(
-              row.name
-            )} text-white flex items-center justify-center font-bold text-xs shadow-xs shrink-0 group-hover:scale-105 transition-transform`}
-          >
-            {row.name ? row.name[0].toUpperCase() : 'L'}
-          </div>
+          {row.avatar ? (
+            <img
+              src={row.avatar}
+              alt={row.name}
+              className="w-9 h-9 rounded-xl object-cover shadow-xs border border-slate-200 shrink-0 group-hover:scale-105 transition-transform"
+            />
+          ) : (
+            <div
+              className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${getAvatarGradient(
+                row.name
+              )} text-white flex items-center justify-center font-bold text-xs shadow-xs shrink-0 group-hover:scale-105 transition-transform`}
+            >
+              {row.name ? row.name[0].toUpperCase() : 'L'}
+            </div>
+          )}
           <div className="min-w-0">
             <div className="font-bold text-slate-900 group-hover:text-brand-600 transition-colors text-xs sm:text-sm truncate">
               {row.name}

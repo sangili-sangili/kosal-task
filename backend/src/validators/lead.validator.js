@@ -48,6 +48,11 @@ const createLeadSchema = {
       .nullable()
       .optional()
       .or(z.literal('')),
+    avatar: z
+      .string()
+      .nullable()
+      .optional()
+      .or(z.literal('')),
   }),
 };
 
@@ -73,6 +78,11 @@ const updateLeadSchema = {
       .trim()
       .toLowerCase()
       .email('Please provide a valid email address')
+      .nullable()
+      .optional()
+      .or(z.literal('')),
+    avatar: z
+      .string()
       .nullable()
       .optional()
       .or(z.literal('')),

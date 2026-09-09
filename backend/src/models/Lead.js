@@ -40,6 +40,10 @@ function initLeadModel(sequelize) {
           notEmpty: { msg: 'Phone number is required' },
         },
       },
+      avatar: {
+        type: DataTypes.TEXT('long'),
+        allowNull: true,
+      },
       source: {
         type: DataTypes.STRING(50),
         allowNull: false,

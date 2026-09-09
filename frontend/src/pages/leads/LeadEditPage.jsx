@@ -52,6 +52,7 @@ export function LeadEditPage() {
         stage: data.stage,
         assigned_to: data.assigned_to ? parseInt(data.assigned_to, 10) : undefined,
         follow_up_date: data.follow_up_date || undefined,
+        avatar: data.avatar || null,
       };
 
       await leadService.updateLead(id, payload);

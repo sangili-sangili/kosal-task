@@ -247,9 +247,17 @@ export function LeadDetailPage() {
       {/* Lead Profile Header */}
       <div className="p-6 rounded-2xl bg-white border border-slate-200/90 shadow-subtle flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-slate-900 to-slate-800 text-white flex items-center justify-center font-bold text-lg shrink-0 shadow-subtle">
-            {lead.name ? lead.name[0].toUpperCase() : 'L'}
-          </div>
+          {lead.avatar ? (
+            <img
+              src={lead.avatar}
+              alt={lead.name}
+              className="w-12 h-12 rounded-2xl object-cover shadow-subtle border border-slate-200 shrink-0"
+            />
+          ) : (
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-slate-900 to-slate-800 text-white flex items-center justify-center font-bold text-lg shrink-0 shadow-subtle">
+              {lead.name ? lead.name[0].toUpperCase() : 'L'}
+            </div>
+          )}
 
           <div>
             <div className="flex items-center gap-3">

@@ -20,6 +20,7 @@ export function LeadCreatePage() {
         stage: data.stage || 'NEW',
         assigned_to: data.assigned_to ? parseInt(data.assigned_to, 10) : undefined,
         follow_up_date: data.follow_up_date || undefined,
+        avatar: data.avatar || undefined,
       };
 
       const created = await leadService.createLead(payload);

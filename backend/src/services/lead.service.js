@@ -31,6 +31,7 @@ class LeadService {
     // Clean empty string inputs to null
     if (payload.email === '') payload.email = null;
     if (payload.follow_up_date === '') payload.follow_up_date = null;
+    if (payload.avatar === '') payload.avatar = null;
 
     const created = await leadRepository.create(payload);
     const lead = await leadRepository.findById(created.id);
@@ -164,6 +165,7 @@ class LeadService {
 
     if (payload.email === '') payload.email = null;
     if (payload.follow_up_date === '') payload.follow_up_date = null;
+    if (payload.avatar === '') payload.avatar = null;
 
     await lead.update(payload);
     const updatedLead = await leadRepository.findById(id);
