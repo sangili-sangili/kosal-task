@@ -27,6 +27,17 @@ const createProjectSchema = {
       .trim()
       .default('ACTIVE')
       .optional(),
+    cover_image: z.string().optional().nullable(),
+    coverImage: z.string().optional().nullable(),
+    country: z.string().trim().max(100).optional().nullable(),
+    state: z.string().trim().max(100).optional().nullable(),
+    city: z.string().trim().max(100).optional().nullable(),
+    starting_price: z.string().trim().max(100).optional().nullable(),
+    startingPrice: z.string().trim().max(100).optional().nullable(),
+    price_range: z.string().trim().max(100).optional().nullable(),
+    priceRange: z.string().trim().max(100).optional().nullable(),
+    possession_date: z.string().trim().max(100).optional().nullable(),
+    possessionDate: z.string().trim().max(100).optional().nullable(),
   }),
 };
 
@@ -36,6 +47,17 @@ const updateProjectSchema = {
     location: z.string().trim().min(2).max(255).optional(),
     description: z.string().trim().optional().nullable(),
     status: z.string().trim().optional(),
+    cover_image: z.string().optional().nullable(),
+    coverImage: z.string().optional().nullable(),
+    country: z.string().trim().max(100).optional().nullable(),
+    state: z.string().trim().max(100).optional().nullable(),
+    city: z.string().trim().max(100).optional().nullable(),
+    starting_price: z.string().trim().max(100).optional().nullable(),
+    startingPrice: z.string().trim().max(100).optional().nullable(),
+    price_range: z.string().trim().max(100).optional().nullable(),
+    priceRange: z.string().trim().max(100).optional().nullable(),
+    possession_date: z.string().trim().max(100).optional().nullable(),
+    possessionDate: z.string().trim().max(100).optional().nullable(),
   }),
 };
 

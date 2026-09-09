@@ -20,6 +20,7 @@ import {
   Link2,
   Pencil,
   AlertTriangle,
+  Download,
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
 import { Card, CardContent } from '../../components/ui/Card';
@@ -31,6 +32,8 @@ import Textarea from '../../components/ui/Textarea';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
 import StateCitySelect from '../../components/forms/StateCitySelect';
+import { formatINRCompact } from '../../utils/crmFormatters';
+import { exportProjectsToExcel } from '../../utils/excelExport';
 
 const COVER_PRESETS = [
   {
@@ -80,7 +83,10 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
       const projectList = Array.isArray(data) ? data : [];
       const enriched = projectList.map((p, idx) => ({
         ...p,
-        coverImage: p.coverImage || COVER_PRESETS[idx % COVER_PRESETS.length].url,
+        coverImage: p.cover_image || p.coverImage || COVER_PRESETS[idx % COVER_PRESETS.length].url,
+        startingPrice: p.starting_price || p.startingPrice || '',
+        priceRange: p.price_range || p.priceRange || '',
+        possessionDate: p.possession_date || p.possessionDate || 'Dec 2027',
       }));
       setProjects(enriched);
       if (setContextProjects) setContextProjects(enriched);
@@ -95,6 +101,29 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
   useEffect(() => {
     fetchProjects();
   }, []);
+
+  // Toast feedback state for Export and actions
+  const [feedback, setFeedback] = useState(null);
+  const showFeedback = (msg, type = 'success') => {
+    setFeedback({ msg, type });
+    setTimeout(() => setFeedback(null), 3500);
+  };
+
+  // Export Property Projects to Excel (.csv)
+  const handleExportToExcel = () => {
+    const listToExport = filteredProjects.length > 0 ? filteredProjects : projects;
+    if (!listToExport || listToExport.length === 0) {
+      showFeedback('No property developments available to export.', 'error');
+      return;
+    }
+    try {
+      exportProjectsToExcel(listToExport);
+      showFeedback(`Successfully exported ${listToExport.length} property development${listToExport.length === 1 ? '' : 's'} to Excel (.csv)!`);
+    } catch (err) {
+      console.error('Failed to export projects to Excel:', err);
+      showFeedback('Failed to export projects to Excel.', 'error');
+    }
+  };
 
   useEffect(() => {
     if (defaultOpenCreate || location.pathname.includes('/create') || location.pathname.includes('/new')) {
@@ -221,23 +250,22 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
 
     setIsSubmitting(true);
     try {
-      const fullLocation = [
-        formData.location.trim(),
-        formData.city,
-        formData.state !== 'Karnataka' ? formData.state : '',
-      ]
-        .filter(Boolean)
-        .join(', ');
-
       const desc =
         formData.description.trim() ||
-        `Master-planned residential development in ${formData.city || 'Bengaluru'}. Starting at ${formData.startingPrice}. Possession: ${formData.possessionDate}.`;
+        `Master-planned residential development in ${formData.city || 'Bengaluru'}. Starting at ${formData.startingPrice || 'market rates'}. Possession: ${formData.possessionDate || 'Under construction'}.`;
 
       const newProject = await propertyService.createProject({
         name: formData.name.trim(),
-        location: fullLocation,
+        location: formData.location.trim(),
+        country: formData.country || 'India',
+        state: formData.state || 'Karnataka',
+        city: formData.city || 'Bengaluru',
+        starting_price: formData.startingPrice,
+        price_range: formData.priceRange,
+        possession_date: formData.possessionDate,
         description: desc,
         status: 'ACTIVE',
+        cover_image: formData.coverImage,
       });
 
       // Create initial towers/buildings for this project in the live database
@@ -274,11 +302,11 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
       state: proj.state || 'Karnataka',
       city: proj.city || (proj.location ? proj.location.split(',')[1]?.trim() : '') || 'Bengaluru',
       location: proj.location || '',
-      priceRange: proj.priceRange || '',
-      startingPrice: proj.startingPrice || '',
-      possessionDate: proj.possessionDate || 'Dec 2027',
+      priceRange: proj.price_range || proj.priceRange || '',
+      startingPrice: proj.starting_price || proj.startingPrice || '',
+      possessionDate: proj.possession_date || proj.possessionDate || 'Dec 2027',
       description: proj.description || '',
-      coverImage: proj.coverImage || COVER_PRESETS[0].url,
+      coverImage: proj.cover_image || proj.coverImage || COVER_PRESETS[0].url,
     });
     setEditUploadedFileName('Current cover image');
     setEditErrors({});
@@ -319,7 +347,14 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
       await propertyService.updateProject(editingProject.id, {
         name: editFormData.name.trim(),
         location: editFormData.location.trim(),
+        country: editFormData.country || 'India',
+        state: editFormData.state || 'Karnataka',
+        city: editFormData.city || 'Bengaluru',
+        starting_price: editFormData.startingPrice,
+        price_range: editFormData.priceRange,
+        possession_date: editFormData.possessionDate,
         description: editFormData.description.trim(),
+        cover_image: editFormData.coverImage,
       });
 
       setEditingProject(null);
@@ -364,6 +399,22 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
 
   return (
     <div className="space-y-6">
+      {/* Toast Feedback Notification */}
+      {feedback && (
+        <div
+          className={`fixed top-20 right-6 z-50 text-white text-xs px-4 py-3 rounded-xl shadow-modal flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2 ${
+            feedback.type === 'error' ? 'bg-rose-600' : 'bg-slate-900'
+          }`}
+        >
+          {feedback.type === 'error' ? (
+            <AlertTriangle className="w-4 h-4 text-white shrink-0" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          )}
+          <span>{feedback.msg}</span>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
         <div>
@@ -376,6 +427,18 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <Button
+            type="button"
+            variant="secondary"
+            size="md"
+            leftIcon={<Download className="w-4 h-4" />}
+            onClick={handleExportToExcel}
+            className="border-emerald-300/80 text-emerald-800 bg-emerald-50/70 hover:bg-emerald-100 hover:border-emerald-400 font-semibold shadow-2xs transition-all"
+            title="Download formatted Excel spreadsheet of property developments"
+          >
+            Export Excel
+          </Button>
+
           <Link to="/units">
             <Button variant="secondary" size="md" leftIcon={<Layers className="w-4 h-4" />}>
               View All Units
@@ -386,7 +449,7 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
             size="md"
             leftIcon={<Plus className="w-4 h-4" />}
             onClick={() => setIsCreateModalOpen(true)}
-            className="shadow-xs"
+            className="shadow-xs font-semibold"
           >
             Add New Property
           </Button>
@@ -460,8 +523,8 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
 
             const priceDisplay =
               unitPrices.length > 0
-                ? `From ₹${(Math.min(...unitPrices) / 100000).toFixed(1)} L`
-                : project.priceRange || project.startingPrice || 'From ₹95 L';
+                ? `From ${formatINRCompact(Math.min(...unitPrices))}`
+                : project.price_range || project.priceRange || (project.starting_price || project.startingPrice ? `From ${project.starting_price || project.startingPrice}` : 'From ₹95 L');
 
             return (
               <div
@@ -473,6 +536,7 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
                 <div className="relative h-48 w-full overflow-hidden bg-slate-100">
                   <img
                     src={
+                      project.cover_image ||
                       project.coverImage ||
                       'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=600&q=80'
                     }
@@ -537,7 +601,9 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
                         {towersCount} {towersCount === 1 ? 'Tower' : 'Towers'}
                       </span>
                       <span className="font-semibold text-slate-800">
-                        {totalUnits > 0 ? `${availableUnits} Units Available` : 'Configure Units'}
+                        {totalUnits > 0
+                          ? `${availableUnits} ${availableUnits === 1 ? 'Unit' : 'Units'} Available`
+                          : 'Configure Units'}
                       </span>
                     </div>
 
@@ -562,7 +628,7 @@ export function ProjectListPage({ defaultOpenCreate = false }) {
                   <div className="pt-2 flex items-center justify-between border-t border-slate-100 text-xs font-semibold">
                     <span className="text-slate-400 flex items-center gap-1">
                       <Calendar className="w-3.5 h-3.5" />
-                      {project.possessionDate || 'Dec 2027'}
+                      {project.possession_date || project.possessionDate || 'Dec 2027'}
                     </span>
                     <span className="text-brand-700 group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
                       View Project Details

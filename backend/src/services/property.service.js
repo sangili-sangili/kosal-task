@@ -12,7 +12,14 @@ class PropertyService {
   // ==========================================
 
   async createProject(projectData) {
-    const project = await projectRepository.create(projectData);
+    const data = {
+      ...projectData,
+      cover_image: projectData.cover_image !== undefined ? projectData.cover_image : (projectData.coverImage !== undefined ? projectData.coverImage : null),
+      starting_price: projectData.starting_price !== undefined ? projectData.starting_price : (projectData.startingPrice !== undefined ? projectData.startingPrice : null),
+      price_range: projectData.price_range !== undefined ? projectData.price_range : (projectData.priceRange !== undefined ? projectData.priceRange : null),
+      possession_date: projectData.possession_date !== undefined ? projectData.possession_date : (projectData.possessionDate !== undefined ? projectData.possessionDate : null),
+    };
+    const project = await projectRepository.create(data);
     logger.info(`Project created: ID ${project.id} (${project.name})`);
     return project;
   }
@@ -35,7 +42,21 @@ class PropertyService {
       throw new NotFoundError(`Project with ID ${id} was not found`, 'PROJECT_NOT_FOUND');
     }
 
-    await project.update(updateData);
+    const data = { ...updateData };
+    if (updateData.coverImage !== undefined && updateData.cover_image === undefined) {
+      data.cover_image = updateData.coverImage;
+    }
+    if (updateData.startingPrice !== undefined && updateData.starting_price === undefined) {
+      data.starting_price = updateData.startingPrice;
+    }
+    if (updateData.priceRange !== undefined && updateData.price_range === undefined) {
+      data.price_range = updateData.priceRange;
+    }
+    if (updateData.possessionDate !== undefined && updateData.possession_date === undefined) {
+      data.possession_date = updateData.possessionDate;
+    }
+
+    await project.update(data);
     logger.info(`Project ID ${id} updated`);
     return project;
   }

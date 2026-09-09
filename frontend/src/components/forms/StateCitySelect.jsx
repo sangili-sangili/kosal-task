@@ -66,10 +66,9 @@ export function StateCitySelect({
     fetchStatesForCountry(selectedCountry)
       .then((states) => {
         if (isMounted) {
-          setStatesList(states);
-          // If current state not in new country's states, select the first one
+          setStatesList(states || []);
           if (states && states.length > 0) {
-            if (!states.includes(selectedState) && !isCustomState) {
+            if (!selectedState && !isCustomState) {
               onStateChange?.(states[0]);
             }
           } else {
@@ -102,12 +101,10 @@ export function StateCitySelect({
     fetchCitiesForState(selectedCountry, selectedState)
       .then((cities) => {
         if (isMounted) {
-          setCitiesList(cities);
-          // If current city is not in the new list, default to first city
-          if (cities && cities.length > 0) {
-            if (!cities.includes(selectedCity) && !isCustomCity) {
-              onCityChange?.(cities[0]);
-            }
+          setCitiesList(cities || []);
+          // Only if no city is currently selected, default to the first city
+          if (cities && cities.length > 0 && !selectedCity && !isCustomCity) {
+            onCityChange?.(cities[0]);
           }
         }
       })
@@ -124,6 +121,22 @@ export function StateCitySelect({
       isMounted = false;
     };
   }, [selectedCountry, selectedState]);
+
+  const allStatesList = React.useMemo(() => {
+    const list = [...statesList];
+    if (selectedState && !list.includes(selectedState) && selectedState !== '__OTHER_STATE__') {
+      list.unshift(selectedState);
+    }
+    return list;
+  }, [statesList, selectedState]);
+
+  const allCitiesList = React.useMemo(() => {
+    const list = [...citiesList];
+    if (selectedCity && !list.includes(selectedCity) && selectedCity !== '__OTHER__') {
+      list.unshift(selectedCity);
+    }
+    return list;
+  }, [citiesList, selectedCity]);
 
   const isGeoLoading = isLoadingCountries || isLoadingStates || isLoadingCities;
 
@@ -158,6 +171,8 @@ export function StateCitySelect({
             onChange={(e) => {
               const newCountry = e.target.value;
               onCountryChange?.(newCountry);
+              onStateChange?.('');
+              onCityChange?.('');
             }}
             error={countryError}
             options={countriesList.map((c) => ({
@@ -200,13 +215,15 @@ export function StateCitySelect({
                   if (e.target.value === '__OTHER_STATE__') {
                     setIsCustomState(true);
                     onStateChange?.('');
+                    onCityChange?.('');
                   } else {
                     onStateChange?.(e.target.value);
+                    onCityChange?.('');
                   }
                 }}
                 error={stateError}
                 options={[
-                  ...statesList.map((st) => ({
+                  ...allStatesList.map((st) => ({
                     value: st,
                     label: st,
                   })),
@@ -259,12 +276,12 @@ export function StateCitySelect({
                 }}
                 error={cityError}
                 helperText={
-                  !cityError && citiesList.length > 0
-                    ? `${citiesList.length} cities cataloged`
+                  !cityError && allCitiesList.length > 0
+                    ? `${allCitiesList.length} cities cataloged`
                     : undefined
                 }
                 options={[
-                  ...citiesList.map((c) => ({
+                  ...allCitiesList.map((c) => ({
                     value: c,
                     label: c,
                   })),

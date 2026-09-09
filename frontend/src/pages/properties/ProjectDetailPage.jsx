@@ -112,12 +112,15 @@ export function ProjectDetailPage() {
     setIsLoading(true);
     setFetchError(null);
     try {
-      const data = await propertyService.getProjectById(currentProjectId``);
+      const data = await propertyService.getProjectById(currentProjectId);
       if (!data) throw new Error('Development project not found');
       const presetCover = COVER_PRESETS[(data.id || 0) % COVER_PRESETS.length]?.url;
       setProject({
         ...data,
-        coverImage: data.coverImage || presetCover,
+        coverImage: data.cover_image || data.coverImage || presetCover,
+        startingPrice: data.starting_price || data.startingPrice || '',
+        priceRange: data.price_range || data.priceRange || '',
+        possessionDate: data.possession_date || data.possessionDate || 'Dec 2027',
       });
     } catch (err) {
       console.error('Failed to fetch project details:', err);
@@ -141,11 +144,11 @@ export function ProjectDetailPage() {
       state: project.state || 'Karnataka',
       city: project.city || (project.location ? project.location.split(',')[1]?.trim() : '') || 'Bengaluru',
       location: project.location || '',
-      priceRange: project.priceRange || '',
-      startingPrice: project.startingPrice || '',
-      possessionDate: project.possessionDate || 'Dec 2027',
+      priceRange: project.price_range || project.priceRange || '',
+      startingPrice: project.starting_price || project.startingPrice || '',
+      possessionDate: project.possession_date || project.possessionDate || 'Dec 2027',
       description: project.description || '',
-      coverImage: project.coverImage || COVER_PRESETS[0].url,
+      coverImage: project.cover_image || project.coverImage || COVER_PRESETS[0].url,
     });
     setEditUploadedFileName('Current cover image');
     setEditErrors({});
@@ -187,7 +190,14 @@ export function ProjectDetailPage() {
       await propertyService.updateProject(project.id, {
         name: editFormData.name.trim(),
         location: editFormData.location.trim(),
+        country: editFormData.country || 'India',
+        state: editFormData.state || 'Karnataka',
+        city: editFormData.city || 'Bengaluru',
+        starting_price: editFormData.startingPrice,
+        price_range: editFormData.priceRange,
+        possession_date: editFormData.possessionDate,
         description: editFormData.description.trim(),
+        cover_image: editFormData.coverImage,
       });
       setIsEditModalOpen(false);
       await fetchProjectDetails();
@@ -427,6 +437,7 @@ export function ProjectDetailPage() {
         className="relative rounded-2xl overflow-hidden text-white shadow-card p-6 sm:p-8"
         style={{
           backgroundImage: `linear-gradient(to right, rgba(15, 23, 42, 0.96) 0%, rgba(15, 23, 42, 0.82) 55%, rgba(15, 23, 42, 0.65) 100%), url(${
+            project.cover_image ||
             project.coverImage ||
             'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1200&q=80'
           })`,
@@ -440,7 +451,7 @@ export function ProjectDetailPage() {
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-brand-500/20 text-brand-300 border border-brand-400/30 backdrop-blur-xs">
                 <MapPin className="w-3 h-3 text-brand-400" />
-                {project.location || project.city}
+                {project.location || [project.city, project.state, project.country].filter(Boolean).join(', ')}
               </span>
 
               <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 backdrop-blur-xs">
@@ -449,7 +460,7 @@ export function ProjectDetailPage() {
               </span>
 
               <span className="text-xs font-medium text-slate-300 bg-slate-800/80 px-2.5 py-0.5 rounded-full border border-slate-700/60">
-                Possession: <strong className="text-white ml-1">{project.possessionDate}</strong>
+                Possession: <strong className="text-white ml-1">{project.possession_date || project.possessionDate || 'Dec 2027'}</strong>
               </span>
             </div>
 
@@ -463,7 +474,7 @@ export function ProjectDetailPage() {
 
             <div className="pt-2 flex flex-wrap items-center gap-4 text-xs">
               <div className="text-emerald-300 font-bold text-sm">
-                Pricing: {project.priceRange || `From ${project.startingPrice}`}
+                Pricing: {project.price_range || project.priceRange || (project.starting_price || project.startingPrice ? `From ${project.starting_price || project.startingPrice}` : 'Starting ₹95 L')}
               </div>
               <div className="text-slate-400">•</div>
               <div className="text-slate-300">

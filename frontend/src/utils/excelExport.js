@@ -68,4 +68,64 @@ export function exportLeadsToExcel(leads = []) {
   exportToExcel(`RealEstate_CRM_Leads_${timestamp}`, headers, rows);
 }
 
+/**
+ * Specifically format and export Property Developments & Projects data to Excel (.csv)
+ * @param {Array} projects
+ */
+export function exportProjectsToExcel(projects = []) {
+  const headers = [
+    'Project ID',
+    'Project Name',
+    'City',
+    'State',
+    'Country',
+    'Specific Location / Address',
+    'Starting Price',
+    'Full Price Bracket',
+    'Possession Date',
+    'Towers / Blocks',
+    'Total Units',
+    'Available Units',
+    'Booked / Allotted Units',
+    'Occupancy Rate',
+    'Status',
+    'Overview / Highlights',
+    'Created Date',
+  ];
+
+  const rows = projects.map((proj) => {
+    const projectUnits = proj.buildings?.flatMap((b) => b.units || []) || [];
+    const availableUnits = projectUnits.filter((u) => u.status === 'AVAILABLE').length;
+    const totalUnits = projectUnits.length;
+    const bookedUnits = totalUnits - availableUnits;
+    const occupancyRate = totalUnits ? `${Math.round((bookedUnits / totalUnits) * 100)}%` : '0%';
+    const towersCount = proj.buildings?.length || 0;
+
+    return [
+      proj.id || '',
+      proj.name || '',
+      proj.city || '',
+      proj.state || '',
+      proj.country || 'India',
+      proj.location || '',
+      proj.starting_price || proj.startingPrice || '',
+      proj.price_range || proj.priceRange || '',
+      proj.possession_date || proj.possessionDate || '',
+      towersCount,
+      totalUnits,
+      availableUnits,
+      bookedUnits,
+      occupancyRate,
+      proj.status || 'ACTIVE',
+      proj.description || '',
+      proj.created_at || proj.createdAt
+        ? new Date(proj.created_at || proj.createdAt).toLocaleDateString('en-IN')
+        : '',
+    ];
+  });
+
+  const timestamp = new Date().toISOString().split('T')[0];
+  exportToExcel(`RealEstate_CRM_Projects_${timestamp}`, headers, rows);
+}
+
 export default exportLeadsToExcel;

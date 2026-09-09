@@ -34,6 +34,37 @@ function initProjectModel(sequelize) {
         allowNull: false,
         defaultValue: 'ACTIVE',
       },
+      cover_image: {
+        type: DataTypes.TEXT('long'),
+        allowNull: true,
+      },
+      country: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        defaultValue: 'India',
+      },
+      state: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        defaultValue: 'Karnataka',
+      },
+      city: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+        defaultValue: 'Bengaluru',
+      },
+      starting_price: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+      },
+      price_range: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+      },
+      possession_date: {
+        type: DataTypes.STRING(100),
+        allowNull: true,
+      },
     },
     {
       sequelize,
