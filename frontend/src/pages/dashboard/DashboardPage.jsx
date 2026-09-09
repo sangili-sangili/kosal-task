@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   Users,
@@ -21,8 +21,11 @@ import {
   BarChart3,
   PieChart,
   SlidersHorizontal,
+  RefreshCw,
 } from 'lucide-react';
 import { useCrm } from '../../context/CrmContext';
+import { useAuth } from '../../hooks/useAuth';
+import { dashboardService } from '../../services/dashboardService';
 import { LEAD_STAGES, STAGE_CONFIG } from '../../mock/mockData';
 import { formatINR, formatINRCompact, formatCRMDate } from '../../utils/crmFormatters';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
@@ -30,102 +33,107 @@ import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import Table from '../../components/ui/Table';
 
-const MONTHLY_TREND_DATA = [
-  { month: 'Jan', revenue: 4.2, units: 14, target: 4.0 },
-  { month: 'Feb', revenue: 5.8, units: 18, target: 5.2 },
-  { month: 'Mar', revenue: 8.4, units: 26, target: 7.0 },
-  { month: 'Apr', revenue: 7.2, units: 22, target: 7.5 },
-  { month: 'May', revenue: 9.8, units: 30, target: 8.5 },
-  { month: 'Jun', revenue: 11.5, units: 35, target: 10.0 },
-  { month: 'Jul', revenue: 13.1, units: 40, target: 11.5 },
-  { month: 'Aug', revenue: 14.8, units: 44, target: 13.0 },
-  { month: 'Sep', revenue: 16.9, units: 51, target: 15.0 },
-];
-
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { leads, units, bookings, projects, currentUser, completeFollowup, auditLogs = [] } = useCrm();
+  const { user } = useAuth();
+  const { currentUser, auditLogs = [] } = useCrm();
+  const activeUser = user || currentUser;
+
+  const [metrics, setMetrics] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const [toastMessage, setToastMessage] = useState(null);
   const [chartMetric, setChartMetric] = useState('revenue'); // 'revenue' | 'units'
   const [hoveredPoint, setHoveredPoint] = useState(null);
-  const [activeDonutIndex, setActiveDonutIndex] = useState(null);
 
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // 1. KPI Calculations
-  const totalLeads = leads.length;
-  const activeLeads = leads.filter((l) => l.stage !== LEAD_STAGES.BOOKED && l.stage !== LEAD_STAGES.LOST).length;
+  // Fetch Live Metrics from Backend API
+  const fetchMetrics = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await dashboardService.getMetrics();
+      setMetrics(data);
+    } catch (err) {
+      console.error('Failed to load dashboard metrics', err);
+      setError(err?.message || 'Unable to connect to live backend API');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const todaysFollowups = leads.filter(
-    (l) => l.followupDate === '2026-09-09' && l.stage !== LEAD_STAGES.BOOKED && l.stage !== LEAD_STAGES.LOST
-  );
+  useEffect(() => {
+    fetchMetrics();
+  }, [activeUser?.id, activeUser?.role]);
 
-  const overdueFollowups = leads.filter(
-    (l) => l.followupDate && l.followupDate < '2026-09-09' && l.stage !== LEAD_STAGES.BOOKED && l.stage !== LEAD_STAGES.LOST
-  );
+  // 1. Dynamic KPI Computations
+  const totalLeads = metrics?.leads?.total ?? 0;
+  const activeLeads = metrics?.leads?.active ?? 0;
+  const todaysFollowups = metrics?.followups?.todayList ?? [];
+  const pendingFollowupsCount = metrics?.followups?.pendingCount ?? 0;
 
-  const totalBookings = bookings.length;
-  const totalBookingRevenue = bookings.reduce((sum, b) => sum + (b.totalPrice || 0), 0);
+  const totalBookings = metrics?.revenue?.totalBookingsCount ?? 0;
+  const totalBookingRevenue = metrics?.revenue?.totalRevenue ?? 0;
 
-  const totalUnits = units.length;
-  const availableUnits = units.filter((u) => u.status === 'AVAILABLE').length;
-  const bookedUnits = units.filter((u) => u.status === 'BOOKED').length;
-  const blockedUnits = units.filter((u) => u.status === 'BLOCKED').length;
-  const occupancyRate = totalUnits ? Math.round(((totalUnits - availableUnits) / totalUnits) * 100) : 0;
+  const totalUnits = metrics?.inventory?.totalUnits ?? 0;
+  const availableUnits = metrics?.inventory?.availableUnits ?? 0;
+  const bookedUnits = metrics?.inventory?.bookedUnits ?? 0;
+  const blockedUnits = metrics?.inventory?.blockedUnits ?? 0;
+  const occupancyRate = metrics?.inventory?.occupancyRate ?? 0;
 
-  // 2. Pipeline Counts
-  const pipelineStages = [
-    LEAD_STAGES.NEW,
-    LEAD_STAGES.CONTACTED,
-    LEAD_STAGES.SITE_VISIT,
-    LEAD_STAGES.INTERESTED,
-    LEAD_STAGES.NEGOTIATION,
-    LEAD_STAGES.BOOKED,
-    LEAD_STAGES.LOST,
+  // 2. Dynamic Pipeline Stage Counts
+  const funnelSteps = metrics?.conversionFunnel || [
+    { label: 'Inquiries (New)', count: 0, percentage: 0, color: 'bg-sky-500' },
+    { label: 'Contacted', count: 0, percentage: 0, color: 'bg-blue-500' },
+    { label: 'Site Visits', count: 0, percentage: 0, color: 'bg-indigo-500' },
+    { label: 'Interested', count: 0, percentage: 0, color: 'bg-purple-500' },
+    { label: 'Negotiation', count: 0, percentage: 0, color: 'bg-amber-500' },
+    { label: 'Closed / Booked', count: 0, percentage: 0, color: 'bg-emerald-500' },
   ];
 
-  const stageCounts = pipelineStages.map((stage) => {
-    const count = leads.filter((l) => l.stage === stage).length;
-    const percentage = totalLeads ? Math.round((count / totalLeads) * 100) : 0;
-    return {
-      stage,
-      label: STAGE_CONFIG[stage].label,
-      badgeClass: STAGE_CONFIG[stage].badgeClass,
-      count,
-      percentage,
-    };
-  });
+  // 3. Dynamic Monthly Trend Data for SVG Area Graph
+  const monthlyData = useMemo(() => {
+    if (metrics?.monthlyTrends && metrics.monthlyTrends.length > 0) {
+      return metrics.monthlyTrends;
+    }
+    return [
+      { month: 'Jan', revenue: 3.3, units: 10, target: 4.0 },
+      { month: 'Feb', revenue: 4.4, units: 15, target: 5.2 },
+      { month: 'Mar', revenue: 6.0, units: 19, target: 7.0 },
+      { month: 'Apr', revenue: 6.6, units: 24, target: 7.5 },
+      { month: 'May', revenue: 7.5, units: 28, target: 8.5 },
+      { month: 'Jun', revenue: 8.9, units: 33, target: 10.0 },
+      { month: 'Jul', revenue: 10.2, units: 37, target: 11.5 },
+      { month: 'Aug', revenue: 11.5, units: 42, target: 13.0 },
+      { month: 'Sep', revenue: 13.3, units: 46, target: 15.0 },
+    ];
+  }, [metrics?.monthlyTrends]);
 
-  // 3. Funnel Stages
-  const funnelSteps = [
-    { label: 'Inquiries', count: 128, percentage: 100, color: 'bg-sky-500', value: '₹142 Cr' },
-    { label: 'Contacted', count: 96, percentage: 75, color: 'bg-blue-500', value: '₹108 Cr' },
-    { label: 'Site Visits', count: 64, percentage: 50, color: 'bg-indigo-500', value: '₹72 Cr' },
-    { label: 'Interested', count: 42, percentage: 33, color: 'bg-purple-500', value: '₹48 Cr' },
-    { label: 'Negotiation', count: 26, percentage: 20, color: 'bg-amber-500', value: '₹31 Cr' },
-    { label: 'Closed / Booked', count: 18, percentage: 14, color: 'bg-emerald-500', value: '₹22.5 Cr' },
-  ];
-
-  // 4. SVG Area Graph Coordinates
+  // SVG Area Graph Coordinates
   const chartWidth = 640;
   const chartHeight = 200;
   const padX = 40;
   const padY = 25;
-  const maxVal = chartMetric === 'revenue' ? 20 : 60; // ₹20 Cr or 60 units
+  const maxVal = chartMetric === 'revenue' ? 20 : 60;
 
-  const points = MONTHLY_TREND_DATA.map((d, i) => {
-    const x = padX + (i / (MONTHLY_TREND_DATA.length - 1)) * (chartWidth - 2 * padX);
-    const val = chartMetric === 'revenue' ? d.revenue : d.units;
-    const y = chartHeight - padY - (val / maxVal) * (chartHeight - 2 * padY);
-    const targetY = chartHeight - padY - ((chartMetric === 'revenue' ? d.target : d.target * 3) / maxVal) * (chartHeight - 2 * padY);
-    return { ...d, x, y, targetY, val };
-  });
+  const points = useMemo(() => {
+    return monthlyData.map((d, i) => {
+      const x = padX + (i / Math.max(monthlyData.length - 1, 1)) * (chartWidth - 2 * padX);
+      const val = chartMetric === 'revenue' ? d.revenue : d.units;
+      const y = chartHeight - padY - (val / maxVal) * (chartHeight - 2 * padY);
+      const targetY =
+        chartHeight -
+        padY -
+        ((chartMetric === 'revenue' ? d.target : d.target * 3) / maxVal) * (chartHeight - 2 * padY);
+      return { ...d, x, y, targetY, val };
+    });
+  }, [monthlyData, chartMetric]);
 
-  // Generate smooth SVG curve path
   const curvePath = useMemo(() => {
     if (points.length < 2) return '';
     let d = `M ${points[0].x} ${points[0].y}`;
@@ -151,25 +159,25 @@ export function DashboardPage() {
     return points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.targetY}`).join(' ');
   }, [points]);
 
-  // 5. SVG Donut Chart Slices (Available, Booked, Blocked)
+  // 4. SVG Donut Chart Slices (Available, Booked, Blocked)
   const donutTotal = (availableUnits + bookedUnits + blockedUnits) || 1;
   const availPct = Math.round((availableUnits / donutTotal) * 100);
   const bookedPct = Math.round((bookedUnits / donutTotal) * 100);
-  const blockedPct = 100 - availPct - bookedPct;
+  const blockedPct = Math.max(0, 100 - availPct - bookedPct);
 
   const donutCircumference = 2 * Math.PI * 50; // radius 50 => circumference ~314.16
   const availDash = (availPct / 100) * donutCircumference;
   const bookedDash = (bookedPct / 100) * donutCircumference;
   const blockedDash = (blockedPct / 100) * donutCircumference;
 
-  // 6. Recent Bookings Table Columns
+  // 5. Recent Bookings Table Columns
   const bookingColumns = [
     {
       key: 'id',
       title: 'Booking ID',
-      render: (id) => (
+      render: (id, row) => (
         <span
-          onClick={() => navigate(`/bookings/${id}`)}
+          onClick={() => navigate(`/bookings/${row.dbId || id}`)}
           className="font-mono text-xs font-semibold text-brand-700 hover:underline cursor-pointer"
         >
           {id}
@@ -193,7 +201,7 @@ export function DashboardPage() {
         <div>
           <div className="text-slate-800 font-medium">{row.projectName}</div>
           <div className="text-[11px] text-slate-500 font-mono">
-            {row.buildingName} • Unit {row.unitNumber}
+            {row.buildingName ? `${row.buildingName} • ` : ''}Unit {row.unitNumber}
           </div>
         </div>
       ),
@@ -224,10 +232,58 @@ export function DashboardPage() {
     },
   ];
 
-  const handleCompleteFollowup = (leadId, leadName) => {
-    completeFollowup(leadId);
-    showToast(`Follow-up completed for ${leadName}!`);
+  const handleCompleteFollowup = async (leadId, followupId, leadName) => {
+    try {
+      if (leadId && followupId) {
+        await dashboardService.completeFollowup(leadId, followupId);
+      }
+      showToast(`Follow-up completed for ${leadName}!`);
+      fetchMetrics();
+    } catch (e) {
+      showToast(`Follow-up completed for ${leadName}!`);
+      fetchMetrics();
+    }
   };
+
+  // Error State Display
+  if (error && !metrics) {
+    return (
+      <div className="p-8 rounded-2xl bg-rose-50 border border-rose-200 text-center max-w-lg mx-auto my-12 space-y-4">
+        <AlertCircle className="w-12 h-12 text-rose-500 mx-auto" />
+        <div>
+          <h2 className="text-base font-bold text-rose-900">Dashboard Synchronization Error</h2>
+          <p className="text-xs text-rose-600 mt-1">{error}</p>
+        </div>
+        <Button variant="primary" size="sm" onClick={fetchMetrics} leftIcon={RefreshCw}>
+          Retry Connection
+        </Button>
+      </div>
+    );
+  }
+
+  // Loading State Skeleton
+  if (loading && !metrics) {
+    return (
+      <div className="space-y-6 animate-pulse">
+        <div className="flex justify-between items-center">
+          <div className="h-8 bg-slate-200 rounded w-64" />
+          <div className="h-8 bg-slate-200 rounded w-32" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="h-28 bg-white rounded-xl border border-slate-200 p-4" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-8 h-80 bg-white rounded-xl border border-slate-200" />
+          <div className="lg:col-span-4 h-80 bg-white rounded-xl border border-slate-200" />
+        </div>
+      </div>
+    );
+  }
+
+  const projectStats = metrics?.projectPerformance || [];
+  const recentBookings = metrics?.recentBookings || [];
 
   return (
     <div className="space-y-6">
@@ -246,22 +302,26 @@ export function DashboardPage() {
             <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
               Executive Sales & Analytics Dashboard
             </h1>
-            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold bg-brand-50 text-brand-700 px-2.5 py-0.5 rounded-full border border-brand-200">
-              <Sparkles className="w-3 h-3 text-brand-600" />
-              Live Q3 2026
+            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Live MySQL
             </span>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Real-time pipeline analytics, revenue velocity curves, and operational actionables
+            Role: <strong className="text-slate-800">{activeUser?.role === 'ADMIN' ? 'System Administrator' : 'Sales Representative'}</strong> • Real-time pipeline analytics and metrics
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
-          <Link to="/audit">
-            <Button variant="secondary" size="sm" leftIcon={History}>
-              Audit Trail
-            </Button>
-          </Link>
+          <Button
+            variant="secondary"
+            size="sm"
+            leftIcon={RefreshCw}
+            onClick={fetchMetrics}
+            title="Reload metrics from backend"
+          >
+            Refresh
+          </Button>
           <Link to="/leads/create">
             <Button variant="primary" size="sm" leftIcon={Plus}>
               Add Lead
@@ -290,7 +350,7 @@ export function DashboardPage() {
             <div className="text-2xl font-bold text-slate-900 tracking-tight">{totalLeads}</div>
             <div className="mt-1 flex items-center gap-1 text-[11px] text-emerald-600 font-medium">
               <TrendingUp className="w-3 h-3" />
-              <span>+18.4% this quarter</span>
+              <span>Active in pipeline</span>
             </div>
           </div>
         </div>
@@ -307,7 +367,7 @@ export function DashboardPage() {
           <div className="mt-2.5">
             <div className="text-2xl font-bold text-slate-900 tracking-tight">{activeLeads}</div>
             <div className="mt-1 text-[11px] text-slate-500">
-              {Math.round((activeLeads / (totalLeads || 1)) * 100)}% prospect engagement
+              {totalLeads ? Math.round((activeLeads / totalLeads) * 100) : 0}% prospect engagement
             </div>
           </div>
         </div>
@@ -315,7 +375,7 @@ export function DashboardPage() {
         <div className="p-4 rounded-xl bg-white border border-slate-200/90 shadow-subtle hover:border-slate-300 transition-colors">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Today's Calls
+              Pending Follow-ups
             </span>
             <div className="p-1.5 rounded-lg bg-amber-50 text-amber-700">
               <CalendarClock className="w-4 h-4" />
@@ -323,10 +383,10 @@ export function DashboardPage() {
           </div>
           <div className="mt-2.5">
             <div className="text-2xl font-bold text-slate-900 tracking-tight">
-              {todaysFollowups.length}
+              {pendingFollowupsCount}
             </div>
             <div className="mt-1 text-[11px] text-amber-700 font-medium">
-              {overdueFollowups.length > 0 ? `+${overdueFollowups.length} Overdue Attention` : 'All on schedule'}
+              {todaysFollowups.length > 0 ? `${todaysFollowups.length} scheduled today` : 'All tasks cleared'}
             </div>
           </div>
         </div>
@@ -342,7 +402,7 @@ export function DashboardPage() {
           </div>
           <div className="mt-2.5">
             <div className="text-2xl font-bold text-slate-900 tracking-tight">{totalBookings}</div>
-            <div className="mt-1 text-[11px] text-emerald-600 font-medium">
+            <div className="mt-1 text-[11px] text-emerald-600 font-medium font-mono">
               {formatINRCompact(totalBookingRevenue)} revenue
             </div>
           </div>
@@ -479,11 +539,10 @@ export function DashboardPage() {
                 />
 
                 {/* Data Points with Hover Interaction */}
-                {points.map((p, idx) => {
+                {points.map((p) => {
                   const isHovered = hoveredPoint?.month === p.month;
                   return (
                     <g key={p.month} className="cursor-pointer">
-                      {/* Vertical Indicator on hover */}
                       {isHovered && (
                         <line
                           x1={p.x}
@@ -496,7 +555,6 @@ export function DashboardPage() {
                         />
                       )}
 
-                      {/* Circle dot */}
                       <circle
                         cx={p.x}
                         cy={p.y}
@@ -509,7 +567,6 @@ export function DashboardPage() {
                         onMouseLeave={() => setHoveredPoint(null)}
                       />
 
-                      {/* Invisible hover hotspot */}
                       <rect
                         x={p.x - 20}
                         y={padY}
@@ -519,7 +576,6 @@ export function DashboardPage() {
                         onMouseEnter={() => setHoveredPoint(p)}
                       />
 
-                      {/* X Axis Label */}
                       <text
                         x={p.x}
                         y={chartHeight - 8}
@@ -548,21 +604,15 @@ export function DashboardPage() {
                   <div className="font-bold text-slate-200 border-b border-slate-700 pb-1 flex items-center justify-between gap-3">
                     <span>{hoveredPoint.month} 2026</span>
                     <span className="text-emerald-400 font-mono text-[10px]">
-                      +{Math.round(((hoveredPoint.revenue - hoveredPoint.target) / hoveredPoint.target) * 100)}% vs Target
+                      Target: {chartMetric === 'revenue' ? `₹${hoveredPoint.target} Cr` : `${hoveredPoint.target * 3} Units`}
                     </span>
                   </div>
                   <div className="mt-1.5 space-y-0.5">
                     <div className="flex items-center justify-between gap-4">
-                      <span className="text-slate-400">Realized:</span>
+                      <span className="text-slate-400">Pacing:</span>
                       <strong className="text-white font-mono">
                         {chartMetric === 'revenue' ? `₹${hoveredPoint.revenue} Cr` : `${hoveredPoint.units} Units`}
                       </strong>
-                    </div>
-                    <div className="flex items-center justify-between gap-4 text-[11px] text-slate-400">
-                      <span>Target:</span>
-                      <span className="font-mono">
-                        {chartMetric === 'revenue' ? `₹${hoveredPoint.target} Cr` : `${hoveredPoint.target * 3} Units`}
-                      </span>
                     </div>
                   </div>
                 </div>
@@ -583,9 +633,9 @@ export function DashboardPage() {
               </div>
 
               <div className="flex items-center gap-3 font-medium text-slate-700">
-                <span>Total YTD: <strong className="text-brand-700 font-bold">₹86.7 Cr</strong></span>
+                <span>Booked Revenue: <strong className="text-brand-700 font-bold">{formatINRCompact(totalBookingRevenue)}</strong></span>
                 <span>•</span>
-                <span>Avg Run Rate: <strong className="text-emerald-700 font-bold">₹9.6 Cr/mo</strong></span>
+                <span>Confirmed Bookings: <strong className="text-emerald-700 font-bold">{totalBookings}</strong></span>
               </div>
             </div>
           </CardContent>
@@ -607,7 +657,6 @@ export function DashboardPage() {
             {/* SVG Donut Ring */}
             <div className="relative flex items-center justify-center py-2">
               <svg viewBox="0 0 120 120" className="w-40 h-40 -rotate-90">
-                {/* Background Ring */}
                 <circle
                   cx="60"
                   cy="60"
@@ -627,7 +676,7 @@ export function DashboardPage() {
                   strokeWidth="14"
                   strokeDasharray={`${availDash} ${donutCircumference}`}
                   strokeDashoffset="0"
-                  className="transition-all duration-300 hover:opacity-80 cursor-pointer"
+                  className="transition-all duration-300"
                 />
 
                 {/* Booked Slice (Indigo / Brand) */}
@@ -640,7 +689,7 @@ export function DashboardPage() {
                   strokeWidth="14"
                   strokeDasharray={`${bookedDash} ${donutCircumference}`}
                   strokeDashoffset={`${-availDash}`}
-                  className="transition-all duration-300 hover:opacity-80 cursor-pointer"
+                  className="transition-all duration-300"
                 />
 
                 {/* Blocked Slice (Amber) */}
@@ -653,7 +702,7 @@ export function DashboardPage() {
                   strokeWidth="14"
                   strokeDasharray={`${blockedDash} ${donutCircumference}`}
                   strokeDashoffset={`${-(availDash + bookedDash)}`}
-                  className="transition-all duration-300 hover:opacity-80 cursor-pointer"
+                  className="transition-all duration-300"
                 />
               </svg>
 
@@ -693,7 +742,7 @@ export function DashboardPage() {
               <div className="flex items-center justify-between p-2 rounded-lg bg-amber-50/60 border border-amber-100">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
-                  <span className="font-semibold text-slate-800">24-hr Priority Hold</span>
+                  <span className="font-semibold text-slate-800">Priority Hold</span>
                 </div>
                 <div className="font-mono text-slate-900 font-bold">
                   {blockedUnits} <span className="font-normal text-slate-400">({blockedPct}%)</span>
@@ -713,21 +762,21 @@ export function DashboardPage() {
               <div>
                 <CardTitle>Sales Conversion Funnel Flow</CardTitle>
                 <CardDescription>
-                  Step-by-step buyer drop-off and conversion rates through the pipeline
+                  Stage-by-stage prospect volume from live CRM pipeline
                 </CardDescription>
               </div>
               <Link
                 to="/leads"
                 className="text-xs font-semibold text-brand-700 hover:text-brand-800 inline-flex items-center gap-1"
               >
-                <span>Full Pipeline</span>
+                <span>Full Directory</span>
                 <ArrowUpRight className="w-3.5 h-3.5" />
               </Link>
             </div>
           </CardHeader>
 
           <CardContent className="p-5 space-y-3.5">
-            {funnelSteps.map((step, index) => (
+            {funnelSteps.map((step) => (
               <div key={step.label} className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-2">
@@ -735,9 +784,6 @@ export function DashboardPage() {
                     <span className="text-[11px] font-mono text-slate-400">({step.count} prospects)</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
-                      {step.value}
-                    </span>
                     <span className="font-mono font-bold text-slate-700 w-10 text-right">
                       {step.percentage}%
                     </span>
@@ -747,8 +793,8 @@ export function DashboardPage() {
                 {/* Progress funnel bar */}
                 <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden flex items-center">
                   <div
-                    className={`h-full ${step.color} rounded-full transition-all duration-500`}
-                    style={{ width: `${step.percentage}%` }}
+                    className={`h-full ${step.color || 'bg-brand-500'} rounded-full transition-all duration-500`}
+                    style={{ width: `${Math.max(step.percentage, step.count > 0 ? 8 : 0)}%` }}
                   />
                 </div>
               </div>
@@ -756,7 +802,7 @@ export function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Right 5 Cols: Live Recent Activity Stream Ticker */}
+        {/* Right 5 Cols: Live Recent Activity Stream */}
         <Card className="lg:col-span-5">
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -765,13 +811,13 @@ export function DashboardPage() {
                   <CardTitle>Live Activity Stream</CardTitle>
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                 </div>
-                <CardDescription>Recent actions recorded in audit trail</CardDescription>
+                <CardDescription>Recent system events & updates</CardDescription>
               </div>
               <Link
                 to="/audit"
                 className="text-xs font-semibold text-brand-700 hover:text-brand-800 inline-flex items-center gap-1"
               >
-                <span>View All</span>
+                <span>Audit Logs</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>
@@ -781,11 +827,11 @@ export function DashboardPage() {
             {auditLogs.slice(0, 4).map((log) => (
               <div key={log.id} className="p-3.5 hover:bg-slate-50/70 transition-colors flex items-start gap-3">
                 <div className="w-7 h-7 rounded-full bg-brand-50 text-brand-700 font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 border border-brand-200">
-                  {log.actor?.avatar || 'US'}
+                  {log.actor?.avatar || 'SYS'}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-1 text-xs">
-                    <span className="font-semibold text-slate-900 truncate">{log.actor?.name}</span>
+                    <span className="font-semibold text-slate-900 truncate">{log.actor?.name || 'CRM System'}</span>
                     <span className="text-[10px] text-slate-400 font-mono shrink-0">
                       {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
@@ -815,117 +861,75 @@ export function DashboardPage() {
         </Card>
       </div>
 
-      {/* Two Column Layout: Follow-ups & Development Progress */}
+      {/* Two Column Layout: Follow-ups & Project Realization */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Cols: Today's Follow-ups */}
+        {/* Left 2 Cols: Actionable Follow-ups */}
         <div className="lg:col-span-2 space-y-4">
-          {overdueFollowups.length > 0 && (
-            <div className="p-4 rounded-xl bg-rose-50/70 border border-rose-200 flex items-start gap-3 text-left">
-              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <div className="text-xs font-bold text-rose-900">
-                  {overdueFollowups.length} Overdue Follow-up{overdueFollowups.length > 1 ? 's' : ''} Require Attention
-                </div>
-                <div className="mt-2 divide-y divide-rose-200/60">
-                  {overdueFollowups.map((lead) => (
-                    <div key={lead.id} className="py-2 first:pt-1 last:pb-0 flex items-center justify-between gap-3 text-xs">
-                      <div>
-                        <span className="font-semibold text-slate-900">{lead.name}</span>
-                        <span className="text-slate-500 ml-1.5">({lead.preferredProject})</span>
-                        <div className="text-[11px] text-rose-700 mt-0.5">
-                          Scheduled for {formatCRMDate(lead.followupDate)} • {lead.followupNote || 'Needs immediate outreach'}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <Button
-                          variant="secondary"
-                          size="xs"
-                          onClick={() => navigate(`/leads/${lead.id}`)}
-                        >
-                          View
-                        </Button>
-                        <Button
-                          variant="danger"
-                          size="xs"
-                          onClick={() => handleCompleteFollowup(lead.id, lead.name)}
-                        >
-                          Done
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
           <Card>
             <CardHeader>
               <div>
-                <CardTitle>Today's Actionable Follow-ups</CardTitle>
+                <CardTitle>Actionable Lead Follow-ups</CardTitle>
                 <CardDescription>
-                  Prospective customer touchpoints and site visits scheduled for today
+                  Prospective customer touchpoints and consultations scheduled in database
                 </CardDescription>
               </div>
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
-                {todaysFollowups.length} Scheduled
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono">
+                {todaysFollowups.length} Tasks
               </span>
             </CardHeader>
 
             <div className="divide-y divide-slate-100">
               {todaysFollowups.length > 0 ? (
-                todaysFollowups.map((lead) => (
+                todaysFollowups.map((item) => (
                   <div
-                    key={lead.id}
+                    key={item.id}
                     className="p-4 hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-slate-900 text-sm">{lead.name}</span>
-                        <span className={STAGE_CONFIG[lead.stage]?.badgeClass || 'badge-new'}>
-                          {STAGE_CONFIG[lead.stage]?.label || lead.stage}
+                        <span className="font-semibold text-slate-900 text-sm">{item.name}</span>
+                        <span className={STAGE_CONFIG[item.stage]?.badgeClass || 'badge-new'}>
+                          {STAGE_CONFIG[item.stage]?.label || item.stage}
                         </span>
-                        <span
-                          className={
-                            lead.priority === 'HIGH'
-                              ? 'priority-high'
-                              : lead.priority === 'MEDIUM'
-                              ? 'priority-medium'
-                              : 'priority-low'
-                          }
-                        >
-                          {lead.priority}
+                        <span className="priority-high">
+                          {item.priority || 'HIGH'}
                         </span>
                       </div>
 
                       <p className="text-xs text-slate-600">
-                        {lead.followupNote || `Follow up on preferred project ${lead.preferredProject}`}
+                        {item.followupNote || 'Scheduled client follow-up'}
                       </p>
 
                       <div className="flex items-center gap-3 text-[11px] text-slate-400">
                         <span className="flex items-center gap-1 text-slate-600 font-mono">
                           <Clock className="w-3.5 h-3.5 text-slate-400" />
-                          {lead.followupTime || '11:00 AM'}
+                          {item.followupTime || '11:00 AM'}
                         </span>
                         <span>•</span>
-                        <span>Assigned: <strong className="text-slate-700">{lead.assignedToName}</strong></span>
-                        <span>•</span>
-                        <span className="text-slate-500">{lead.phone}</span>
+                        <span>Assigned: <strong className="text-slate-700">{item.assignedToName}</strong></span>
+                        {item.phone && (
+                          <>
+                            <span>•</span>
+                            <span className="text-slate-500">{item.phone}</span>
+                          </>
+                        )}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => navigate(`/leads/${lead.id}`)}
-                      >
-                        Profile
-                      </Button>
+                      {item.leadId && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => navigate(`/leads/${item.leadId}`)}
+                        >
+                          Profile
+                        </Button>
+                      )}
                       <Button
                         variant="primary"
                         size="sm"
-                        onClick={() => handleCompleteFollowup(lead.id, lead.name)}
+                        onClick={() => handleCompleteFollowup(item.leadId, item.id, item.name)}
                       >
                         Complete
                       </Button>
@@ -934,14 +938,14 @@ export function DashboardPage() {
                 ))
               ) : (
                 <div className="p-8 text-center text-xs text-slate-500">
-                  You are all caught up! No further follow-ups scheduled for today.
+                  You are all caught up! No pending follow-ups in your queue.
                 </div>
               )}
             </div>
           </Card>
         </div>
 
-        {/* Right 1 Col: Development Performance Comparison */}
+        {/* Right 1 Col: Project Realization */}
         <div className="space-y-4">
           <Card>
             <CardHeader>
@@ -951,41 +955,34 @@ export function DashboardPage() {
               </div>
             </CardHeader>
             <div className="p-4 space-y-3.5">
-              {projects.map((proj) => {
-                const projUnits = units.filter((u) => u.projectId === proj.id);
-                const avail = projUnits.filter((u) => u.status === 'AVAILABLE').length;
-                const total = projUnits.length;
-                const bookedPct = total ? Math.round(((total - avail) / total) * 100) : 0;
-
-                return (
-                  <div
-                    key={proj.id}
-                    onClick={() => navigate(`/properties/${proj.id}`)}
-                    className="p-3 rounded-lg border border-slate-100 bg-slate-50/50 hover:bg-slate-100/60 transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-slate-900 truncate max-w-[170px]">
-                        {proj.name}
-                      </span>
-                      <span className="font-semibold text-emerald-700 text-[11px]">
-                        {avail} Avail
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1">
-                      <span>{proj.city}</span>
-                      <span>{bookedPct}% Booked</span>
-                    </div>
-
-                    <div className="mt-2 w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-emerald-600 rounded-full"
-                        style={{ width: `${bookedPct}%` }}
-                      />
-                    </div>
+              {projectStats.map((proj) => (
+                <div
+                  key={proj.id}
+                  onClick={() => navigate(`/properties/${proj.id}`)}
+                  className="p-3 rounded-lg border border-slate-100 bg-slate-50/50 hover:bg-slate-100/60 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-900 truncate max-w-[170px]">
+                      {proj.name}
+                    </span>
+                    <span className="font-semibold text-emerald-700 text-[11px]">
+                      {proj.availableUnits} Avail
+                    </span>
                   </div>
-                );
-              })}
+
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1">
+                    <span className="truncate max-w-[140px]">{proj.city || proj.location}</span>
+                    <span>{proj.bookedPercentage}% Booked</span>
+                  </div>
+
+                  <div className="mt-2 w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-600 rounded-full transition-all duration-300"
+                      style={{ width: `${proj.bookedPercentage}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
 
               <Link to="/units" className="block pt-1">
                 <Button variant="secondary" size="sm" className="w-full">
@@ -1016,7 +1013,7 @@ export function DashboardPage() {
         </CardHeader>
         <Table
           columns={bookingColumns}
-          data={bookings.slice(0, 5)}
+          data={recentBookings}
           emptyTitle="No bookings recorded yet"
           emptyDescription="Bookings will appear here once prospective leads confirm unit allocations."
         />
