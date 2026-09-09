@@ -13,6 +13,7 @@ const errorMiddleware = require('./middlewares/error.middleware');
 const notFoundMiddleware = require('./middlewares/notFound.middleware');
 const rateLimitMiddleware = require('./middlewares/rateLimit.middleware');
 const healthRoutes = require('./routes/health.routes');
+const authRoutes = require('./routes/auth.routes');
 
 const app = express();
 
@@ -53,8 +54,9 @@ app.use(requestLogger);
 // 5. Rate Limiting on API endpoints
 app.use('/api/', rateLimitMiddleware);
 
-// 6. Base API v1 Health Check
+// 6. Base API v1 Routes
 app.use('/api/v1', healthRoutes);
+app.use('/api/v1/auth', authRoutes);
 
 // Root fallback
 app.get('/', (req, res) => {

@@ -1,34 +1,49 @@
 const { z } = require('zod');
+const { ROLES } = require('../constants/roles');
 
+/**
+ * Validation schema for user authentication (Login)
+ */
 const loginSchema = {
   body: z.object({
-    email: z.string().trim().email('Please enter a valid email address'),
-    password: z.string().min(6, 'Password must be at least 6 characters'),
-  }),
-};
-
-const registerSchema = {
-  body: z.object({
-    firstName: z.string().trim().min(2, 'First name must have at least 2 characters').max(50),
-    lastName: z.string().trim().min(2, 'Last name must have at least 2 characters').max(50),
-    email: z.string().trim().email('Please enter a valid email address'),
+    email: z
+      .string({ required_error: 'Email is required' })
+      .trim()
+      .toLowerCase()
+      .email('Please provide a valid email address'),
     password: z
-      .string()
-      .min(8, 'Password must be at least 8 characters')
-      .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
-      .regex(/[0-9]/, 'Password must contain at least one number'),
-    phone: z.string().trim().max(20).optional(),
+      .string({ required_error: 'Password is required' })
+      .min(1, 'Password cannot be empty'),
   }),
 };
 
-const refreshTokenSchema = {
+/**
+ * Validation schema for user registration / admin creation
+ */
+const createUserSchema = {
   body: z.object({
-    refreshToken: z.string().min(1, 'Refresh token is required'),
+    name: z
+      .string({ required_error: 'Name is required' })
+      .trim()
+      .min(2, 'Name must be at least 2 characters')
+      .max(100, 'Name cannot exceed 100 characters'),
+    email: z
+      .string({ required_error: 'Email is required' })
+      .trim()
+      .toLowerCase()
+      .email('Please provide a valid email address'),
+    password: z
+      .string({ required_error: 'Password is required' })
+      .min(6, 'Password must be at least 6 characters'),
+    role: z
+      .enum([ROLES.ADMIN, ROLES.SALES], {
+        errorMap: () => ({ message: `Role must be either ${ROLES.ADMIN} or ${ROLES.SALES}` }),
+      })
+      .default(ROLES.SALES),
   }),
 };
 
 module.exports = {
   loginSchema,
-  registerSchema,
-  refreshTokenSchema,
+  createUserSchema,
 };

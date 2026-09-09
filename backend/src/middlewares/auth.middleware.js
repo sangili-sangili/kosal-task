@@ -1,23 +1,30 @@
 const { verifyAccessToken } = require('../utils/jwt');
-const { UnauthorizedError } = require('../errors');
+const { UnauthorizedError } = require('../utils/errors');
 
-function authenticate(req, res, next) {
+/**
+ * Authentication Middleware
+ * Validates the JWT Bearer token and attaches decoded user claims to req.user
+ */
+function authMiddleware(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       throw new UnauthorizedError('Authentication token is missing or malformed', 'TOKEN_MISSING');
     }
 
-    const token = authHeader.substring(7);
+    const token = authHeader.substring(7).trim();
+    if (!token) {
+      throw new UnauthorizedError('Authentication token is missing or malformed', 'TOKEN_MISSING');
+    }
+
     const decoded = verifyAccessToken(token);
 
-    // Attach user payload to request
+    // Attach user payload to request object
     req.user = {
-      id: decoded.sub,
-      uuid: decoded.uuid,
+      id: decoded.id,
+      name: decoded.name,
       email: decoded.email,
-      roles: decoded.roles || [],
-      permissions: decoded.permissions || [],
+      role: decoded.role,
     };
 
     return next();
@@ -26,4 +33,4 @@ function authenticate(req, res, next) {
   }
 }
 
-module.exports = authenticate;
+module.exports = authMiddleware;

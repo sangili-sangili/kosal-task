@@ -1,62 +1,42 @@
 const authService = require('../services/auth.service');
-const ApiResponse = require('../utils/apiResponse');
-const { HTTP_STATUS } = require('../constants/httpStatusCodes');
+const { sendSuccess, sendCreated } = require('../utils/response');
 
 class AuthController {
+  /**
+   * User login endpoint
+   * POST /api/v1/auth/login
+   */
   async login(req, res, next) {
     try {
       const { email, password } = req.body;
-      const context = {
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-      };
-
-      const result = await authService.login(email, password, context);
-      return ApiResponse.success(res, result, 'Login successful', HTTP_STATUS.OK);
+      const result = await authService.login(email, password);
+      return sendSuccess(res, 'Login successful', result);
     } catch (error) {
       return next(error);
     }
   }
 
+  /**
+   * Get current authenticated user profile
+   * GET /api/v1/auth/me
+   */
+  async getMe(req, res, next) {
+    try {
+      const user = await authService.getCurrentUser(req.user.id);
+      return sendSuccess(res, 'Profile retrieved successfully', { user });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  /**
+   * User registration / admin user creation endpoint
+   * POST /api/v1/auth/register
+   */
   async register(req, res, next) {
     try {
-      const result = await authService.register(req.body);
-      return ApiResponse.created(res, result, 'User registered successfully');
-    } catch (error) {
-      return next(error);
-    }
-  }
-
-  async refreshToken(req, res, next) {
-    try {
-      const { refreshToken } = req.body;
-      const context = {
-        ipAddress: req.ip,
-        userAgent: req.headers['user-agent'],
-      };
-
-      const result = await authService.refreshToken(refreshToken, context);
-      return ApiResponse.success(res, result, 'Token refreshed successfully');
-    } catch (error) {
-      return next(error);
-    }
-  }
-
-  async logout(req, res, next) {
-    try {
-      const { refreshToken } = req.body;
-      await authService.logout(refreshToken);
-      return ApiResponse.success(res, null, 'Logged out successfully');
-    } catch (error) {
-      return next(error);
-    }
-  }
-
-  async getProfile(req, res, next) {
-    try {
-      const userService = require('../services/user.service');
-      const user = await userService.getUserById(req.user.id);
-      return ApiResponse.success(res, user, 'User profile fetched successfully');
+      const user = await authService.registerUser(req.body);
+      return sendCreated(res, 'User registered successfully', { user });
     } catch (error) {
       return next(error);
     }

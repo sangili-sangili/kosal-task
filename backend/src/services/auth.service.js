@@ -1,90 +1,75 @@
 const userRepository = require('../repositories/user.repository');
-const roleRepository = require('../repositories/role.repository');
-const { RefreshToken, sequelize } = require('../models');
-const { hashPassword, comparePassword } = require('../utils/password');
-const { generateAccessToken, generateRefreshToken, hashRefreshToken } = require('../utils/jwt');
-const { UnauthorizedError, ConflictError, BadRequestError } = require('../errors');
-const appEvents = require('../events/eventEmitter');
-const env = require('../config/env');
-const { ROLES } = require('../constants/roles');
+const { comparePassword, hashPassword } = require('../utils/password');
+const { generateAccessToken } = require('../utils/jwt');
+const { UnauthorizedError, NotFoundError, ConflictError } = require('../utils/errors');
+const logger = require('../config/logger');
 
 class AuthService {
-  async login(email, password, { ipAddress = null, userAgent = null } = {}) {
-    const user = await userRepository.findByEmail(email);
+  /**
+   * Authenticate user credentials and generate JWT token
+   * @param {string} email
+   * @param {string} password
+   * @returns {Promise<{ user: Object, token: string }>}
+   */
+  async login(email, password) {
+    const user = await userRepository.findByEmail(email, { includePassword: true });
     if (!user) {
+      logger.warn(`Failed login attempt for non-existent email: ${email}`);
       throw new UnauthorizedError('Invalid email or password', 'INVALID_CREDENTIALS');
     }
 
-    if (user.status !== 'ACTIVE') {
-      throw new UnauthorizedError(`Account is currently ${user.status.toLowerCase()}`, 'ACCOUNT_DISABLED');
+    if (!user.is_active) {
+      logger.warn(`Login attempt for inactive user ID: ${user.id} (${email})`);
+      throw new UnauthorizedError('Your account has been deactivated. Please contact an administrator.', 'ACCOUNT_DEACTIVATED');
     }
 
-    const isPasswordValid = await comparePassword(password, user.password);
-    if (!isPasswordValid) {
+    const isMatch = await comparePassword(password, user.password_hash);
+    if (!isMatch) {
+      logger.warn(`Failed login attempt (wrong password) for user ID: ${user.id} (${email})`);
       throw new UnauthorizedError('Invalid email or password', 'INVALID_CREDENTIALS');
-    }
-
-    // Generate tokens
-    const roleNames = user.roles ? user.roles.map((r) => r.name) : [];
-    const permissions = [];
-    if (user.roles) {
-      user.roles.forEach((r) => {
-        if (r.permissions) {
-          r.permissions.forEach((p) => {
-            if (!permissions.includes(p.name)) permissions.push(p.name);
-          });
-        }
-      });
     }
 
     const tokenPayload = {
-      sub: user.id,
-      uuid: user.uuid,
+      id: user.id,
+      name: user.name,
       email: user.email,
-      roles: roleNames,
-      permissions,
+      role: user.role,
     };
 
-    const accessToken = generateAccessToken(tokenPayload);
-    const rawRefreshToken = generateRefreshToken();
-    const tokenHash = hashRefreshToken(rawRefreshToken);
+    const token = generateAccessToken(tokenPayload);
 
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + env.JWT.REFRESH_EXPIRATION_DAYS);
-
-    // Save refresh token
-    await RefreshToken.create({
-      userId: user.id,
-      tokenHash,
-      expiresAt,
-      ipAddress,
-      userAgent,
-    });
-
-    // Update last login
-    await user.update({ lastLoginAt: new Date() });
-
-    appEvents.emit('user:login', { user, ipAddress });
+    logger.info(`User logged in successfully: ID ${user.id} (${user.email}) - Role: ${user.role}`);
 
     return {
-      user: {
-        id: user.id,
-        uuid: user.uuid,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        roles: roleNames,
-        permissions,
-      },
-      tokens: {
-        accessToken,
-        refreshToken: rawRefreshToken,
-        expiresIn: env.JWT.ACCESS_EXPIRATION,
-      },
+      user: user.toJSON(),
+      token,
     };
   }
 
-  async register(userData, { defaultRole = ROLES.CUSTOMER } = {}) {
+  /**
+   * Get current authenticated user profile
+   * @param {number|string} userId
+   * @returns {Promise<Object>}
+   */
+  async getCurrentUser(userId) {
+    const user = await userRepository.findById(userId);
+    if (!user) {
+      throw new NotFoundError('User profile not found', 'USER_NOT_FOUND');
+    }
+
+    if (!user.is_active) {
+      throw new UnauthorizedError('Your account has been deactivated.', 'ACCOUNT_DEACTIVATED');
+    }
+
+    return user.toJSON();
+  }
+
+  /**
+   * Register or create a new user (with duplicate check & password hashing)
+   * @param {Object} userData
+   * @returns {Promise<Object>}
+   */
+  async registerUser(userData) {
     const existing = await userRepository.findByEmail(userData.email);
     if (existing) {
       throw new ConflictError('A user with this email address already exists', 'EMAIL_ALREADY_EXISTS');
@@ -92,142 +77,16 @@ class AuthService {
 
     const hashedPassword = await hashPassword(userData.password);
 
-    // Transaction for atomic user & role creation
-    const transaction = await sequelize.transaction();
-    try {
-      const user = await userRepository.create(
-        {
-          firstName: userData.firstName,
-          lastName: userData.lastName,
-          email: userData.email.toLowerCase().trim(),
-          password: hashedPassword,
-          phone: userData.phone || null,
-          status: 'ACTIVE',
-        },
-        { transaction }
-      );
-
-      // Assign default role
-      const role = await roleRepository.findByName(defaultRole, { transaction });
-      if (role) {
-        await user.setRoles([role], { transaction });
-      }
-
-      await transaction.commit();
-
-      appEvents.emit('user:registered', user);
-
-      return {
-        id: user.id,
-        uuid: user.uuid,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        status: user.status,
-      };
-    } catch (error) {
-      await transaction.rollback();
-      throw error;
-    }
-  }
-
-  async refreshToken(rawRefreshToken, { ipAddress = null, userAgent = null } = {}) {
-    if (!rawRefreshToken) {
-      throw new BadRequestError('Refresh token is required');
-    }
-
-    const tokenHash = hashRefreshToken(rawRefreshToken);
-    const storedToken = await RefreshToken.findOne({ where: { tokenHash } });
-
-    if (!storedToken) {
-      throw new UnauthorizedError('Invalid refresh token', 'TOKEN_INVALID');
-    }
-
-    // Reuse Detection: If someone presents an already revoked token, this indicates token theft!
-    if (storedToken.isRevoked) {
-      // Invalidate all tokens for this user immediately!
-      await RefreshToken.update(
-        { isRevoked: true, revokedAt: new Date() },
-        { where: { userId: storedToken.userId } }
-      );
-
-      appEvents.emit('security:token_reuse_detected', {
-        userId: storedToken.userId,
-        ipAddress,
-      });
-
-      throw new UnauthorizedError('Revoked token reuse detected. All sessions terminated.', 'SECURITY_ALERT');
-    }
-
-    if (storedToken.isExpired) {
-      throw new UnauthorizedError('Refresh token has expired', 'TOKEN_EXPIRED');
-    }
-
-    // Revoke current token (Token Rotation)
-    const newRawRefreshToken = generateRefreshToken();
-    const newTokenHash = hashRefreshToken(newRawRefreshToken);
-
-    await storedToken.update({
-      isRevoked: true,
-      revokedAt: new Date(),
-      replacedByTokenHash: newTokenHash,
+    const newUser = await userRepository.create({
+      name: userData.name.trim(),
+      email: userData.email.toLowerCase().trim(),
+      password_hash: hashedPassword,
+      role: userData.role || 'SALES',
+      is_active: true,
     });
 
-    // Create new refresh token
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + env.JWT.REFRESH_EXPIRATION_DAYS);
-
-    await RefreshToken.create({
-      userId: storedToken.userId,
-      tokenHash: newTokenHash,
-      expiresAt,
-      ipAddress,
-      userAgent,
-    });
-
-    // Load user claims
-    const user = await userRepository.findByIdWithRoles(storedToken.userId);
-    if (!user || user.status !== 'ACTIVE') {
-      throw new UnauthorizedError('User account is inactive', 'ACCOUNT_DISABLED');
-    }
-
-    const roleNames = user.roles ? user.roles.map((r) => r.name) : [];
-    const permissions = [];
-    if (user.roles) {
-      user.roles.forEach((r) => {
-        if (r.permissions) {
-          r.permissions.forEach((p) => {
-            if (!permissions.includes(p.name)) permissions.push(p.name);
-          });
-        }
-      });
-    }
-
-    const newAccessToken = generateAccessToken({
-      sub: user.id,
-      uuid: user.uuid,
-      email: user.email,
-      roles: roleNames,
-      permissions,
-    });
-
-    return {
-      tokens: {
-        accessToken: newAccessToken,
-        refreshToken: newRawRefreshToken,
-        expiresIn: env.JWT.ACCESS_EXPIRATION,
-      },
-    };
-  }
-
-  async logout(rawRefreshToken) {
-    if (!rawRefreshToken) return true;
-    const tokenHash = hashRefreshToken(rawRefreshToken);
-    const storedToken = await RefreshToken.findOne({ where: { tokenHash } });
-    if (storedToken) {
-      await storedToken.update({ isRevoked: true, revokedAt: new Date() });
-    }
-    return true;
+    logger.info(`New user registered: ID ${newUser.id} (${newUser.email}) - Role: ${newUser.role}`);
+    return newUser.toJSON();
   }
 }
 
