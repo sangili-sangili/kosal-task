@@ -1,357 +1,449 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Shield,
-  ShieldCheck,
-  KeyRound,
-  Lock,
-  Unlock,
-  Plus,
-  Trash2,
-  Edit2,
-  Check,
-  CheckCircle2,
-  Users,
-  Building2,
-  Layers,
-  BookmarkCheck,
-  UserCheck,
-  History,
-  LayoutDashboard,
-  AlertCircle,
-  FileCheck,
-  RotateCcw,
-  Sparkles,
-  Search,
-  CheckSquare,
-  Square,
-  ExternalLink,
+  Shield, ShieldCheck, KeyRound, Lock, Unlock, Plus, Trash2,
+  Check, CheckCircle2, Users, Building2, Layers, BookmarkCheck,
+  UserCheck, History, LayoutDashboard, AlertCircle, AlertTriangle,
+  RotateCcw, Sparkles, Search, XCircle, Copy,
 } from 'lucide-react';
-import { useCrm } from '../../context/CrmContext';
-import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+import { userService } from '../../services/userService';
+import { Card, CardContent } from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
-import Select from '../../components/ui/Select';
 import Badge from '../../components/ui/Badge';
 import Modal from '../../components/ui/Modal';
+import EmptyState from '../../components/ui/EmptyState';
 
-const MENU_ICON_MAP = {
-  mod_dashboard: LayoutDashboard,
-  mod_leads: Users,
-  mod_properties: Building2,
-  mod_units: Layers,
-  mod_bookings: BookmarkCheck,
-  mod_users: UserCheck,
-  mod_roles: ShieldCheck,
-  mod_audit: History,
+// ── Permission modules — sourced from backend constants ──────────────────────
+const PERMISSION_MODULES = [
+  {
+    id: 'mod_dashboard',
+    category: 'Dashboard',
+    route: '/dashboard',
+    description: 'Access to overview metrics, KPI cards and analytics widgets',
+    icon: LayoutDashboard,
+    permissions: [
+      { id: 'dashboard:view',    label: 'View Dashboard',    desc: 'Access overview metrics and KPI cards' },
+      { id: 'dashboard:export',  label: 'Export Reports',    desc: 'Download dashboard data as Excel or PDF' },
+    ],
+  },
+  {
+    id: 'mod_leads',
+    category: 'Leads Management',
+    route: '/leads',
+    description: 'Manage customer prospects, site visits, follow-ups and pipeline',
+    icon: Users,
+    permissions: [
+      { id: 'customer:create', label: 'Create Leads',   desc: 'Register new prospect and walk-in leads' },
+      { id: 'customer:read',   label: 'View Leads',     desc: 'Browse and search lead pipeline records' },
+      { id: 'customer:update', label: 'Update Leads',   desc: 'Edit lead details, stage and assignment' },
+      { id: 'customer:delete', label: 'Delete Leads',   desc: 'Permanently remove lead records' },
+    ],
+  },
+  {
+    id: 'mod_properties',
+    category: 'Properties & Units',
+    route: '/properties',
+    description: 'Manage real estate projects, buildings and unit inventory',
+    icon: Building2,
+    permissions: [
+      { id: 'property:create', label: 'Add Properties',  desc: 'Create new projects, buildings and units' },
+      { id: 'property:read',   label: 'View Properties', desc: 'Browse project and unit inventory' },
+      { id: 'property:update', label: 'Edit Properties', desc: 'Update prices, floor plans and availability' },
+      { id: 'property:delete', label: 'Delete Properties',desc: 'Remove projects or units from catalog' },
+    ],
+  },
+  {
+    id: 'mod_bookings',
+    category: 'Bookings & Transactions',
+    route: '/bookings',
+    description: 'Create and manage unit allotments, token receipts and cancellations',
+    icon: BookmarkCheck,
+    permissions: [
+      { id: 'transaction:create', label: 'Create Bookings',  desc: 'Register new unit bookings with token' },
+      { id: 'transaction:read',   label: 'View Bookings',    desc: 'View booking records and receipts' },
+      { id: 'booking:update',     label: 'Update Status',    desc: 'Change booking lifecycle status' },
+      { id: 'booking:cancel',     label: 'Cancel Bookings',  desc: 'Cancel bookings and release unit inventory' },
+    ],
+  },
+  {
+    id: 'mod_users',
+    category: 'User Management',
+    route: '/users',
+    description: 'Administer CRM user accounts, credentials and account status',
+    icon: UserCheck,
+    permissions: [
+      { id: 'user:create', label: 'Create Users',   desc: 'Add new CRM user accounts' },
+      { id: 'user:read',   label: 'View Users',     desc: 'View user directory and profiles' },
+      { id: 'user:update', label: 'Update Users',   desc: 'Edit user details, role and status' },
+      { id: 'user:delete', label: 'Delete Users',   desc: 'Remove user accounts from the system' },
+    ],
+  },
+  {
+    id: 'mod_roles',
+    category: 'Roles & Permissions',
+    route: '/roles',
+    description: 'Configure role profiles and granular access permissions',
+    icon: ShieldCheck,
+    permissions: [
+      { id: 'role:read',   label: 'View Roles',   desc: 'View role definitions and permission matrix' },
+      { id: 'role:manage', label: 'Manage Roles', desc: 'Create, edit and delete security roles' },
+    ],
+  },
+  {
+    id: 'mod_audit',
+    category: 'Audit Logs',
+    route: '/audit',
+    description: 'View system activity logs and user action history',
+    icon: History,
+    permissions: [
+      { id: 'audit:read', label: 'View Audit Logs', desc: 'Access system activity and change history' },
+    ],
+  },
+];
+
+// All available permission IDs
+const ALL_PERM_IDS = PERMISSION_MODULES.flatMap((m) => m.permissions.map((p) => p.id));
+
+// Default permissions per role
+const DEFAULT_PERMISSIONS = {
+  ADMIN: ALL_PERM_IDS,                                   // full access
+  SALES: ['customer:read', 'customer:create', 'customer:update',
+          'property:read', 'transaction:read', 'transaction:create',
+          'dashboard:view', 'booking:update'],            // limited access
 };
 
+const EMPTY_NEW_ROLE = { name: '', code: '', description: '', templateCode: 'SALES' };
+
+// ── Component ─────────────────────────────────────────────────────────────────
 export function RoleManagementPage() {
-  const {
-    roles,
-    permissionModules,
-    employees,
-    addRole,
-    updateRole,
-    deleteRole,
-    toggleRolePermission,
-    setRoleCategoryPermissions,
-    currentUser,
-  } = useCrm();
+  // ── Live data from API ───────────────────────────────────────────────────────
+  const [apiRoles,     setApiRoles]     = useState([]);   // raw from backend
+  const [apiUsers,     setApiUsers]     = useState([]);   // raw from backend
+  const [customRoles,  setCustomRoles]  = useState([]);   // locally created
+  const [isLoading,    setIsLoading]    = useState(true);
+  const [fetchError,   setFetchError]   = useState(null);
 
-  const [selectedRoleId, setSelectedRoleId] = useState(roles[0]?.id || 'role-superadmin');
-  const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [saveSuccessNotice, setSaveSuccessNotice] = useState(false);
-  const [permSearch, setPermSearch] = useState('');
+  // ── Local permission state ────────────────────────────────────────────────────
+  const [rolePermissions, setRolePermissions] = useState({}); // { roleCode: [permId, ...] }
 
-  // New Role Form State
-  const [newRoleData, setNewRoleData] = useState({
-    name: '',
-    code: '',
-    description: '',
-    templateRoleId: 'role-executive',
-  });
+  // ── UI state ─────────────────────────────────────────────────────────────────
+  const [selectedRoleCode, setSelectedRoleCode] = useState('');
+  const [permSearch,       setPermSearch]        = useState('');
+  const [saveNotice,       setSaveNotice]        = useState(false);
 
-  const selectedRole = roles.find((r) => r.id === selectedRoleId) || roles[0];
+  // ── Modals ───────────────────────────────────────────────────────────────────
+  const [createModalOpen,  setCreateModalOpen]  = useState(false);
+  const [deleteModalRole,  setDeleteModalRole]  = useState(null); // custom role to delete
+  const [newRoleForm,      setNewRoleForm]      = useState({ ...EMPTY_NEW_ROLE });
+  const [newRoleError,     setNewRoleError]     = useState('');
+  const [feedback,         setFeedback]         = useState(null);
 
-  // Users assigned to this role
-  const assignedEmployees = useMemo(() => {
-    if (!selectedRole) return [];
-    return employees.filter(
-      (emp) => emp.role === selectedRole.code || emp.roleName === selectedRole.name
-    );
-  }, [employees, selectedRole]);
+  const showFeedback = (msg, type = 'success') => {
+    setFeedback({ msg, type });
+    setTimeout(() => setFeedback(null), 3000);
+  };
 
-  // Overall statistics
-  const totalSystemRoles = roles.filter((r) => r.isSystem).length;
-  const totalCustomRoles = roles.length - totalSystemRoles;
-  const totalAllPermsCount = permissionModules.reduce(
-    (sum, m) => sum + m.permissions.length,
-    0
+  const showSaved = () => {
+    setSaveNotice(true);
+    setTimeout(() => setSaveNotice(false), 2500);
+  };
+
+  // ── Fetch roles and users from API ───────────────────────────────────────────
+  const fetchData = useCallback(async () => {
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      const [rolesRes, usersRes] = await Promise.allSettled([
+        userService.getRoles(),
+        userService.getUsers({ limit: 200 }),
+      ]);
+
+      let roles = [];
+      if (rolesRes.status === 'fulfilled') {
+        const rd = rolesRes.value;
+        roles = rd?.data || (Array.isArray(rd) ? rd : []);
+      }
+
+      let users = [];
+      if (usersRes.status === 'fulfilled') {
+        const ud = usersRes.value;
+        const data = ud?.data || ud;
+        users = data?.users || (Array.isArray(data) ? data : []);
+      }
+
+      setApiRoles(roles);
+      setApiUsers(users);
+
+      // Initialize permissions — use defaults
+      const perms = {};
+      roles.forEach((r) => {
+        perms[r.code] = DEFAULT_PERMISSIONS[r.code] || [];
+      });
+      setRolePermissions(perms);
+      if (roles.length > 0 && !selectedRoleCode) {
+        setSelectedRoleCode(roles[0].code);
+      }
+    } catch (err) {
+      setFetchError(err?.message || 'Failed to load roles');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);  // eslint-disable-line
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // ── Derived state ────────────────────────────────────────────────────────────
+  // Merge system roles (API) + custom roles (local)
+  const allRoles = useMemo(() => [
+    ...apiRoles.map((r) => ({ ...r, isSystem: true })),
+    ...customRoles,
+  ], [apiRoles, customRoles]);
+
+  const selectedRole = allRoles.find((r) => r.code === selectedRoleCode);
+
+  const usersForRole = useMemo(() =>
+    apiUsers.filter((u) => u.role === selectedRoleCode),
+    [apiUsers, selectedRoleCode]
   );
 
-  const handleSelectRole = (roleId) => {
-    setSelectedRoleId(roleId);
-    setSaveSuccessNotice(false);
-  };
+  const selectedPerms = useMemo(() =>
+    rolePermissions[selectedRoleCode] || [],
+    [rolePermissions, selectedRoleCode]
+  );
 
-  const handleTogglePerm = (permKey) => {
-    if (selectedRole?.isSystem && selectedRole.code === 'SUPER_ADMIN') return;
-    toggleRolePermission(selectedRole.id, permKey);
-    showTempSavedNotice();
-  };
+  const totalAllPerms = ALL_PERM_IDS.length;
 
-  const handleCategoryToggleAll = (permKeys, enableAll) => {
-    if (selectedRole?.isSystem && selectedRole.code === 'SUPER_ADMIN') return;
-    setRoleCategoryPermissions(selectedRole.id, permKeys, enableAll);
-    showTempSavedNotice();
-  };
-
-  const showTempSavedNotice = () => {
-    setSaveSuccessNotice(true);
-    setTimeout(() => setSaveSuccessNotice(false), 2500);
-  };
-
-  const handleOpenCreateModal = () => {
-    setNewRoleData({
-      name: '',
-      code: '',
-      description: '',
-      templateRoleId: 'role-executive',
-    });
+  // ── Custom role CRUD ─────────────────────────────────────────────────────────
+  const openCreateModal = () => {
+    setNewRoleForm({ ...EMPTY_NEW_ROLE });
+    setNewRoleError('');
     setCreateModalOpen(true);
   };
 
-  const handleSaveNewRole = (e) => {
+  const handleCreateRole = (e) => {
     e.preventDefault();
-    if (!newRoleData.name.trim()) return;
+    const name = newRoleForm.name.trim();
+    const code = (newRoleForm.code || name).toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    const desc = newRoleForm.description.trim() || 'Custom organizational role';
 
-    const templateRole = roles.find((r) => r.id === newRoleData.templateRoleId);
-    const initialPerms = templateRole ? [...templateRole.permissions] : [];
+    if (!name) { setNewRoleError('Role name is required.'); return; }
+    if (allRoles.some((r) => r.code === code)) {
+      setNewRoleError(`Role code "${code}" already exists. Choose a different name.`);
+      return;
+    }
 
-    const created = addRole({
-      name: newRoleData.name.trim(),
-      code: (newRoleData.code || newRoleData.name).trim(),
-      description: newRoleData.description.trim() || 'Custom organizational real estate role',
-      permissions: initialPerms,
-    });
+    // Clone permissions from template role
+    const templatePerms = rolePermissions[newRoleForm.templateCode] || [];
 
+    const newRole = {
+      id:          `custom_${Date.now()}`,
+      code,
+      name,
+      description: desc,
+      label:       name,
+      isSystem:    false,
+    };
+
+    setCustomRoles((prev) => [...prev, newRole]);
+    setRolePermissions((prev) => ({ ...prev, [code]: [...templatePerms] }));
+    setSelectedRoleCode(code);
     setCreateModalOpen(false);
-    setSelectedRoleId(created.id);
+    showFeedback(`Role "${name}" created with ${templatePerms.length} permissions cloned from template.`);
   };
 
-  const handleConfirmDelete = () => {
-    if (!selectedRole || selectedRole.isSystem) return;
-    deleteRole(selectedRole.id);
-    setDeleteConfirmOpen(false);
-    setSelectedRoleId(roles[0]?.id || '');
+  const handleDeleteCustomRole = () => {
+    if (!deleteModalRole) return;
+    const code = deleteModalRole.code;
+    setCustomRoles((prev) => prev.filter((r) => r.code !== code));
+    setRolePermissions((prev) => { const n = { ...prev }; delete n[code]; return n; });
+    setSelectedRoleCode(allRoles.find((r) => r.code !== code)?.code || '');
+    setDeleteModalRole(null);
+    showFeedback(`Role "${deleteModalRole.name}" has been deleted.`);
   };
 
-  // Filter modules based on search
+  // ── Permission toggle handlers ────────────────────────────────────────────────
+  const handleTogglePerm = (permId) => {
+    const cur = rolePermissions[selectedRoleCode] || [];
+    const next = cur.includes(permId)
+      ? cur.filter((p) => p !== permId)
+      : [...cur, permId];
+    setRolePermissions((prev) => ({ ...prev, [selectedRoleCode]: next }));
+    showSaved();
+  };
+
+  const handleModuleToggleAll = (modulePermIds, enableAll) => {
+    const cur = rolePermissions[selectedRoleCode] || [];
+    const next = enableAll
+      ? Array.from(new Set([...cur, ...modulePermIds]))
+      : cur.filter((p) => !modulePermIds.includes(p));
+    setRolePermissions((prev) => ({ ...prev, [selectedRoleCode]: next }));
+    showSaved();
+  };
+
+  // ── Filtered modules ──────────────────────────────────────────────────────────
   const filteredModules = useMemo(() => {
-    if (!permSearch.trim()) return permissionModules;
-    const query = permSearch.toLowerCase();
-    return permissionModules
-      .map((mod) => {
-        const matchesCategory = mod.category.toLowerCase().includes(query);
-        const matchesMenu = mod.menuTitle?.toLowerCase().includes(query);
-        const filteredPerms = mod.permissions.filter(
-          (p) =>
-            p.label.toLowerCase().includes(query) ||
-            p.desc.toLowerCase().includes(query) ||
-            p.id.toLowerCase().includes(query)
-        );
-        if (matchesCategory || matchesMenu || filteredPerms.length > 0) {
-          return {
-            ...mod,
-            permissions: matchesCategory || matchesMenu ? mod.permissions : filteredPerms,
-          };
-        }
-        return null;
-      })
-      .filter(Boolean);
-  }, [permissionModules, permSearch]);
+    if (!permSearch.trim()) return PERMISSION_MODULES;
+    const q = permSearch.toLowerCase();
+    return PERMISSION_MODULES.map((mod) => {
+      const matchesCat = mod.category.toLowerCase().includes(q);
+      const filteredPerms = mod.permissions.filter(
+        (p) => p.label.toLowerCase().includes(q) || p.desc.toLowerCase().includes(q)
+      );
+      if (matchesCat || filteredPerms.length > 0) {
+        return { ...mod, permissions: matchesCat ? mod.permissions : filteredPerms };
+      }
+      return null;
+    }).filter(Boolean);
+  }, [permSearch]);
+
+  // ── Stats ─────────────────────────────────────────────────────────────────────
+  const adminCount  = apiUsers.filter((u) => u.role === 'ADMIN').length;
+  const salesCount  = apiUsers.filter((u) => u.role === 'SALES').length;
+  const systemCount = apiRoles.length;
+  const customCount = customRoles.length;
+
+  // ── Render ────────────────────────────────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <div className="p-12 text-center bg-white border border-slate-200 rounded-2xl">
+        <div className="w-8 h-8 border-3 border-brand-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-xs text-slate-500 font-medium">Loading roles & permissions...</p>
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <div className="p-8 text-center bg-white border border-rose-200 rounded-2xl space-y-3">
+        <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+        <p className="text-sm font-semibold text-slate-800">{fetchError}</p>
+        <Button variant="secondary" size="sm" onClick={fetchData}>Retry</Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Top Page Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* Toast */}
+      {feedback && (
+        <div className={`fixed top-20 right-6 z-50 text-white text-xs px-4 py-3 rounded-xl shadow-modal flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2 ${feedback.type === 'error' ? 'bg-rose-600' : 'bg-slate-900'}`}>
+          {feedback.type === 'error'
+            ? <AlertTriangle className="w-4 h-4 shrink-0" />
+            : <CheckCircle2  className="w-4 h-4 text-emerald-400 shrink-0" />}
+          <span>{feedback.msg}</span>
+        </div>
+      )}
+
+      {/* Page Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-slate-200/80 pb-5">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
-              Roles & Permissions Master
+              Roles &amp; Permissions
             </h1>
-            <Badge variant="brand" size="sm">
-              Menu-Aligned RBAC
-            </Badge>
+            <Badge variant="brand" size="xs">RBAC Matrix</Badge>
           </div>
-          <p className="mt-1 text-xs sm:text-sm text-slate-500">
-            Define organizational privilege profiles with granular permissions matched directly with CRM sidebar menus
+          <p className="mt-0.5 text-xs sm:text-sm text-slate-500">
+            Define granular access controls for each CRM role across all modules
           </p>
         </div>
-
-        <div className="flex items-center gap-2.5">
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={Plus}
-            onClick={handleOpenCreateModal}
-          >
-            Create Custom Role
-          </Button>
-        </div>
+        <Button variant="primary" size="md" leftIcon={<Plus className="w-4 h-4" />} onClick={openCreateModal}>
+          Create Custom Role
+        </Button>
       </div>
 
-      {/* KPI Stats Strip */}
+      {/* KPI Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-4 rounded-xl bg-white border border-slate-200/90 shadow-subtle hover:border-slate-300 transition-all">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Defined Roles</span>
-            <span className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
-              <Shield className="w-4 h-4" />
-            </span>
+        {[
+          { label: 'System Roles',   value: systemCount,   icon: Shield,      color: 'indigo',  sub: `${customCount} custom roles` },
+          { label: 'Permission Keys',value: totalAllPerms, icon: KeyRound,    color: 'emerald', sub: 'Granular access controls' },
+          { label: 'Administrators', value: adminCount,    icon: ShieldCheck, color: 'brand',   sub: 'Full access accounts' },
+          { label: 'Sales Execs',    value: salesCount,    icon: Users,       color: 'amber',   sub: 'Sales team accounts' },
+        ].map(({ label, value, icon: Icon, color, sub }) => (
+          <div key={label} className="p-4 rounded-xl bg-white border border-slate-200/90 shadow-subtle">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">{label}</span>
+              <span className={`p-1.5 rounded-lg bg-${color}-50 text-${color}-600`}>
+                <Icon className="w-4 h-4" />
+              </span>
+            </div>
+            <div className="mt-1.5 text-2xl font-bold text-slate-900">{value}</div>
+            <div className="mt-1 text-[11px] text-slate-500">{sub}</div>
           </div>
-          <div className="mt-2 text-2xl font-bold text-slate-900">{roles.length} Roles</div>
-          <div className="mt-1 text-[11px] text-slate-500">
-            {totalSystemRoles} System Core • {totalCustomRoles} Custom
-          </div>
-        </div>
-
-        <div className="p-4 rounded-xl bg-white border border-slate-200/90 shadow-subtle hover:border-slate-300 transition-all">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">CRM Menu Modules</span>
-            <span className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600">
-              <KeyRound className="w-4 h-4" />
-            </span>
-          </div>
-          <div className="mt-2 text-2xl font-bold text-slate-900">{permissionModules.length} Menus</div>
-          <div className="mt-1 text-[11px] text-slate-500">
-            {totalAllPermsCount} Granular Access Keys
-          </div>
-        </div>
-
-        <div className="p-4 rounded-xl bg-white border border-slate-200/90 shadow-subtle hover:border-slate-300 transition-all">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Assigned Staff</span>
-            <span className="p-1.5 rounded-lg bg-brand-50 text-brand-600">
-              <Users className="w-4 h-4" />
-            </span>
-          </div>
-          <div className="mt-2 text-2xl font-bold text-slate-900">{employees.length} Users</div>
-          <div className="mt-1 text-[11px] text-slate-500">
-            Mapped to organizational security profiles
-          </div>
-        </div>
-
-        <div className="p-4 rounded-xl bg-white border border-slate-200/90 shadow-subtle hover:border-slate-300 transition-all">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Active Selected</span>
-            <span className="p-1.5 rounded-lg bg-purple-50 text-purple-600">
-              <Sparkles className="w-4 h-4" />
-            </span>
-          </div>
-          <div className="mt-2 text-base font-bold text-slate-900 truncate">
-            {selectedRole?.name}
-          </div>
-          <div className="mt-1 text-[11px] text-brand-600 font-mono truncate font-semibold">
-            {selectedRole?.code}
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* Main 2-Column Master-Detail Layout */}
+      {/* Main 2-Col Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Roles Directory Card List (4 cols) */}
+
+        {/* ── Left: Role List ────────────────────────────────────────────────── */}
         <div className="lg:col-span-4 space-y-3">
-          <div className="flex items-center justify-between px-1">
+          <div className="px-1 flex items-center justify-between">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Security Profiles ({roles.length})
+              Security Profiles ({apiRoles.length})
             </h2>
-            <button
-              type="button"
-              onClick={handleOpenCreateModal}
-              className="text-xs font-semibold text-brand-600 hover:text-brand-700 flex items-center gap-1"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              New Role
-            </button>
           </div>
 
           <div className="space-y-2">
-            {roles.map((role) => {
-              const isSelected = role.id === selectedRole?.id;
-              const permsCount = role.permissions?.length || 0;
-              const mappedUsers = employees.filter(
-                (e) => e.role === role.code || e.roleName === role.name
-              ).length;
-              const coveragePct = Math.round((permsCount / totalAllPermsCount) * 100);
+            {allRoles.map((role) => {
+              const isSelected = role.code === selectedRoleCode;
+              const perms      = rolePermissions[role.code] || [];
+              const pct        = Math.round((perms.length / totalAllPerms) * 100);
+              const mapped     = apiUsers.filter((u) => u.role === role.code).length;
+              const isSystem   = role.isSystem !== false; // treat undefined as system
 
               return (
                 <div
-                  key={role.id}
-                  onClick={() => handleSelectRole(role.id)}
-                  className={`p-4 rounded-xl border transition-all cursor-pointer text-left ${
+                  key={role.code}
+                  onClick={() => setSelectedRoleCode(role.code)}
+                  className={`p-4 rounded-xl border transition-all cursor-pointer ${
                     isSelected
                       ? 'bg-white border-brand-600 shadow-md ring-1 ring-brand-500'
                       : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/60 shadow-subtle'
                   }`}
                 >
                   <div className="flex items-start justify-between">
-                    <div className="space-y-1">
+                    <div className="space-y-0.5 min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-slate-900">{role.name}</span>
-                        {role.isSystem ? (
-                          <span
-                            title="Protected Core System Role"
-                            className="p-1 rounded bg-slate-100 text-slate-500"
-                          >
+                        <span className="font-bold text-sm text-slate-900 truncate">{role.name}</span>
+                        {isSystem ? (
+                          <span className="p-1 rounded bg-slate-100 text-slate-500 shrink-0" title="System role — protected">
                             <Lock className="w-3 h-3" />
                           </span>
                         ) : (
-                          <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 shrink-0">
                             Custom
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] font-mono text-slate-400 font-semibold">
-                        {role.code}
-                      </div>
+                      <div className="text-[11px] font-mono text-slate-400 font-semibold">{role.code}</div>
                     </div>
-
-                    <Badge
-                      variant={isSelected ? 'brand' : 'neutral'}
-                      size="sm"
-                    >
-                      {mappedUsers} {mappedUsers === 1 ? 'User' : 'Users'}
+                    <Badge variant={isSelected ? 'brand' : 'neutral'} size="xs">
+                      {mapped} {mapped === 1 ? 'User' : 'Users'}
                     </Badge>
                   </div>
 
-                  <p className="mt-2 text-xs text-slate-500 line-clamp-2 leading-relaxed">
-                    {role.description}
+                  <p className="mt-2 text-xs text-slate-500 leading-relaxed line-clamp-2">
+                    {role.description ||
+                      (role.code === 'ADMIN'
+                        ? 'Full system access with all CRM modules and settings.'
+                        : 'Sales team access for leads, bookings and property viewing.')}
                   </p>
 
                   <div className="mt-3 pt-2.5 border-t border-slate-100 space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                    <div className="flex items-center justify-between text-[11px]">
                       <span className="flex items-center gap-1 font-medium text-slate-600">
-                        <KeyRound className="w-3.5 h-3.5 text-slate-400" />
-                        {permsCount} of {totalAllPermsCount} Permissions
+                        <KeyRound className="w-3 h-3 text-slate-400" />
+                        {perms.length} of {totalAllPerms} Permissions
                       </span>
-                      <span className="font-mono text-[10px] font-semibold text-brand-700">
-                        {coveragePct}%
-                      </span>
+                      <span className="font-mono text-[10px] font-semibold text-brand-700">{pct}%</span>
                     </div>
-
-                    {/* Progress indicator bar */}
                     <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all ${
-                          coveragePct === 100
-                            ? 'bg-purple-600'
-                            : coveragePct > 50
-                            ? 'bg-brand-600'
-                            : 'bg-slate-400'
+                          pct === 100 ? 'bg-purple-600' : pct > 50 ? 'bg-brand-600' : 'bg-slate-400'
                         }`}
-                        style={{ width: `${coveragePct}%` }}
+                        style={{ width: `${pct}%` }}
                       />
                     </div>
                   </div>
@@ -361,10 +453,10 @@ export function RoleManagementPage() {
           </div>
         </div>
 
-        {/* Right Column: Menu-Aligned Permissions Matrix Workspace (8 cols) */}
+        {/* ── Right: Permission Matrix ───────────────────────────────────────── */}
         {selectedRole && (
-          <div className="lg:col-span-8 space-y-6">
-            {/* Active Role Header Card */}
+          <div className="lg:col-span-8 space-y-5">
+            {/* Role Header Card */}
             <Card className="border border-slate-200 shadow-subtle bg-white">
               <CardContent className="p-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
@@ -374,186 +466,157 @@ export function RoleManagementPage() {
                       <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
                         {selectedRole.code}
                       </span>
-                      {selectedRole.isSystem ? (
-                        <Badge variant="neutral" size="sm">
-                          Core System Role
-                        </Badge>
-                      ) : (
-                        <Badge variant="warning" size="sm">
-                          Custom Real Estate Role
-                        </Badge>
-                      )}
+                      {selectedRole.isSystem === false
+                        ? <Badge variant="warning" size="xs">Custom Role</Badge>
+                        : <Badge variant="neutral" size="xs">System Role</Badge>}
                     </div>
-                    <p className="text-xs text-slate-500 mt-1">{selectedRole.description}</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {selectedRole.description ||
+                        (selectedRole.code === 'ADMIN'
+                          ? 'Super administrator with full unrestricted access to all CRM modules.'
+                          : 'Sales executive with access to lead management, bookings and properties.')}
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    {saveSuccessNotice && (
-                      <span className="inline-flex items-center gap-1 text-xs text-emerald-700 font-semibold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 transition-all">
-                        <Check className="w-3.5 h-3.5" />
-                        Permissions Saved
+                    {saveNotice && (
+                      <span className="inline-flex items-center gap-1 text-xs text-emerald-700 font-semibold bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                        <Check className="w-3.5 h-3.5" /> Saved
                       </span>
                     )}
-
-                    {!selectedRole.isSystem && (
+                    {/* Delete only for custom roles */}
+                    {selectedRole.isSystem === false && (
                       <Button
                         variant="ghost"
                         size="xs"
                         className="text-rose-600 hover:bg-rose-50"
-                        onClick={() => setDeleteConfirmOpen(true)}
+                        onClick={(e) => { e.stopPropagation(); setDeleteModalRole(selectedRole); }}
                       >
-                        <Trash2 className="w-3.5 h-3.5 mr-1" />
-                        Delete Role
+                        <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete Role
                       </Button>
                     )}
                   </div>
                 </div>
 
-                {/* Assigned Personnel Chips */}
+                {/* Assigned Users Chips */}
                 <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="text-slate-400 font-medium">Mapped Staff ({assignedEmployees.length}):</span>
-                  {assignedEmployees.length === 0 ? (
-                    <span className="text-slate-400 italic">No staff members currently mapped</span>
+                  <span className="text-slate-400 font-medium">Assigned Users ({usersForRole.length}):</span>
+                  {usersForRole.length === 0 ? (
+                    <span className="text-slate-400 italic">No users mapped to this role</span>
                   ) : (
-                    assignedEmployees.map((emp) => (
+                    usersForRole.slice(0, 8).map((u) => (
                       <div
-                        key={emp.id}
+                        key={u.id}
                         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-medium"
                       >
                         <span className="w-4 h-4 rounded-full bg-brand-600 text-white text-[9px] flex items-center justify-center font-bold">
-                          {emp.avatar || emp.name[0]}
+                          {(u.name || 'U').slice(0, 1).toUpperCase()}
                         </span>
-                        <span>{emp.name}</span>
+                        <span>{u.name}</span>
                       </div>
                     ))
+                  )}
+                  {usersForRole.length > 8 && (
+                    <span className="text-slate-400 text-[11px]">+{usersForRole.length - 8} more</span>
                   )}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Permissions Workspace Toolbar: Search & Explanations */}
+            {/* Search + hint bar */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200/90 shadow-subtle">
               <div className="flex-1 max-w-sm">
                 <Input
-                  placeholder="Filter permissions by menu or capability..."
+                  placeholder="Search permissions by module or capability..."
                   value={permSearch}
                   onChange={(e) => setPermSearch(e.target.value)}
                   isSearch
+                  isClearable
                   onClear={() => setPermSearch('')}
                 />
               </div>
-
-              <div className="flex items-center gap-2 text-xs">
-                {selectedRole.code === 'SUPER_ADMIN' ? (
-                  <span className="text-[11px] text-purple-700 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-200 flex items-center gap-1 font-medium">
-                    <Lock className="w-3.5 h-3.5 text-purple-600" />
-                    Super Admin perms are master unlocked
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-slate-500">
-                    Click any capability switch to toggle access in real-time
-                  </span>
-                )}
-              </div>
+              <span className="text-[11px] text-slate-500">
+                Toggle any permission switch — changes are saved instantly in session
+              </span>
             </div>
 
-            {/* Menu-Aligned Permission Cards */}
+            {/* Permission Module Cards */}
             <div className="space-y-4">
-              {filteredModules.map((module) => {
-                const modulePermKeys = module.permissions.map((p) => p.id);
-                const enabledCount = modulePermKeys.filter((k) =>
-                  selectedRole.permissions.includes(k)
-                ).length;
-                const isAllSelected = enabledCount === modulePermKeys.length;
-                const IconComponent = MENU_ICON_MAP[module.id] || Layers;
+              {filteredModules.map((mod) => {
+                const modPermIds   = mod.permissions.map((p) => p.id);
+                const enabledCount = modPermIds.filter((id) => selectedPerms.includes(id)).length;
+                const isAllOn      = enabledCount === modPermIds.length;
+                const Icon         = mod.icon;
 
                 return (
-                  <Card
-                    key={module.id}
-                    className="border border-slate-200 shadow-subtle bg-white overflow-hidden"
-                  >
-                    {/* Module Card Header */}
+                  <Card key={mod.id} className="border border-slate-200 shadow-subtle bg-white">
+                    {/* Module Header */}
                     <div className="px-5 py-3.5 bg-slate-50/90 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                       <div className="flex items-center gap-2.5">
                         <div className="p-1.5 rounded-lg bg-brand-50 text-brand-700 border border-brand-200/80">
-                          <IconComponent className="w-4 h-4" />
+                          <Icon className="w-4 h-4" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <h4 className="text-sm font-bold text-slate-900">{module.category}</h4>
-                            <span className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.2 rounded border border-slate-200">
-                              Menu: {module.route}
+                            <h4 className="text-sm font-bold text-slate-900">{mod.category}</h4>
+                            <span className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                              {mod.route}
                             </span>
-                            <span className={`text-[10px] font-semibold px-2 py-0.2 rounded-full border ${
-                              enabledCount === module.permissions.length
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                              enabledCount === modPermIds.length
                                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                 : enabledCount > 0
                                 ? 'bg-brand-50 text-brand-700 border-brand-200'
                                 : 'bg-slate-100 text-slate-500 border-slate-200'
                             }`}>
-                              {enabledCount} of {module.permissions.length} Active
+                              {enabledCount}/{modPermIds.length} Active
                             </span>
                           </div>
-                          <p className="text-[11px] text-slate-500 mt-0.5">{module.description}</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">{mod.description}</p>
                         </div>
                       </div>
 
-                      {/* Quick Select / Deselect All per Menu */}
-                      {selectedRole.code !== 'SUPER_ADMIN' && (
-                        <button
-                          type="button"
-                          onClick={() => handleCategoryToggleAll(modulePermKeys, !isAllSelected)}
-                          className="text-xs font-semibold text-brand-600 hover:text-brand-800 transition-colors self-start sm:self-auto shrink-0"
-                        >
-                          {isAllSelected ? 'Deselect All' : 'Select All'}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleModuleToggleAll(modPermIds, !isAllOn)}
+                        className="text-xs font-semibold text-brand-600 hover:text-brand-800 transition-colors shrink-0"
+                      >
+                        {isAllOn ? 'Revoke All' : 'Grant All'}
+                      </button>
                     </div>
 
                     {/* Permissions Grid */}
                     <CardContent className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {module.permissions.map((perm) => {
-                        const isChecked = selectedRole.permissions.includes(perm.id);
-                        const isLocked = selectedRole.code === 'SUPER_ADMIN';
-
+                      {mod.permissions.map((perm) => {
+                        const isOn = selectedPerms.includes(perm.id);
                         return (
                           <div
                             key={perm.id}
-                            onClick={() => !isLocked && handleTogglePerm(perm.id)}
-                            className={`p-3 rounded-xl border transition-all flex items-start justify-between gap-3 select-none ${
-                              isChecked
-                                ? 'bg-emerald-50/30 border-emerald-200 shadow-xs'
+                            onClick={() => handleTogglePerm(perm.id)}
+                            className={`p-3 rounded-xl border transition-all flex items-start justify-between gap-3 cursor-pointer select-none ${
+                              isOn
+                                ? 'bg-emerald-50/40 border-emerald-200 shadow-xs'
                                 : 'bg-white border-slate-200 hover:border-slate-300'
-                            } ${isLocked ? 'cursor-not-allowed opacity-90' : 'cursor-pointer'}`}
+                            }`}
                           >
-                            {/* Label & Description */}
                             <div className="flex-1 space-y-0.5">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-semibold text-xs text-slate-900">
-                                  {perm.label}
-                                </span>
-                              </div>
+                              <div className="font-semibold text-xs text-slate-900">{perm.label}</div>
                               <p className="text-[11px] text-slate-500 leading-normal">{perm.desc}</p>
-                              <div className="text-[10px] font-mono text-slate-400 pt-0.5">
-                                {perm.id}
-                              </div>
+                              <div className="text-[10px] font-mono text-slate-400 pt-0.5">{perm.id}</div>
                             </div>
 
-                            {/* Toggle Switch Component */}
+                            {/* Toggle Switch */}
                             <div className="pt-0.5 shrink-0">
                               <button
                                 type="button"
-                                disabled={isLocked}
-                                aria-label={`Toggle permission ${perm.label}`}
-                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                                  isChecked ? 'bg-emerald-600' : 'bg-slate-300'
-                                } ${isLocked ? 'cursor-not-allowed' : ''}`}
+                                aria-label={`Toggle ${perm.label}`}
+                                className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+                                  isOn ? 'bg-emerald-600' : 'bg-slate-300'
+                                }`}
                               >
-                                <span
-                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                                    isChecked ? 'translate-x-4' : 'translate-x-0'
-                                  }`}
-                                />
+                                <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ${
+                                  isOn ? 'translate-x-4' : 'translate-x-0'
+                                }`} />
                               </button>
                             </div>
                           </div>
@@ -567,127 +630,104 @@ export function RoleManagementPage() {
           </div>
         )}
       </div>
-
-      {/* MODAL 1: Create Custom Role Modal */}
+      {/* ── MODAL: Create Custom Role ─────────────────────────────────── */}
       {createModalOpen && (
         <Modal
           isOpen={createModalOpen}
           onClose={() => setCreateModalOpen(false)}
-          title="Create Custom Security Role"
-          description="Establish a new role profile and pre-populate permissions from an existing template"
+          title="Create Custom Role"
+          description="Define a new security profile and clone permissions from an existing role template"
           size="md"
         >
-          <form onSubmit={handleSaveNewRole} className="space-y-4">
+          <form onSubmit={handleCreateRole} className="space-y-4">
+            {newRoleError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" /> {newRoleError}
+              </div>
+            )}
+
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Role Display Name *
-              </label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Role Display Name *</label>
               <Input
                 required
-                placeholder="e.g. Regional Marketing Lead"
-                value={newRoleData.name}
-                onChange={(e) =>
-                  setNewRoleData({
-                    ...newRoleData,
-                    name: e.target.value,
-                    code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '_'),
-                  })
-                }
+                placeholder="e.g. Channel Partner Manager"
+                value={newRoleForm.name}
+                onChange={(e) => setNewRoleForm({
+                  ...newRoleForm,
+                  name: e.target.value,
+                  code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '_'),
+                })}
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Role Identification Code
-              </label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Role Code (auto-generated)</label>
               <Input
-                placeholder="e.g. MARKETING_LEAD"
-                value={newRoleData.code}
-                onChange={(e) => setNewRoleData({ ...newRoleData, code: e.target.value })}
+                placeholder="e.g. CHANNEL_PARTNER_MGR"
+                value={newRoleForm.code}
+                onChange={(e) => setNewRoleForm({ ...newRoleForm, code: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '') })}
               />
+              <p className="text-[11px] text-slate-400 mt-1">Used internally — uppercase letters, numbers and underscores only.</p>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Role Description
-              </label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Description</label>
               <Input
-                placeholder="Brief summary of duties and departmental scope"
-                value={newRoleData.description}
-                onChange={(e) =>
-                  setNewRoleData({ ...newRoleData, description: e.target.value })
-                }
+                placeholder="Brief summary of this role's responsibilities..."
+                value={newRoleForm.description}
+                onChange={(e) => setNewRoleForm({ ...newRoleForm, description: e.target.value })}
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Pre-populate Permissions From Template
-              </label>
-              <Select
-                value={newRoleData.templateRoleId}
-                onChange={(e) =>
-                  setNewRoleData({ ...newRoleData, templateRoleId: e.target.value })
-                }
-                options={roles.map((r) => ({
-                  value: r.id,
-                  label: `${r.name} (${r.permissions?.length || 0} perms)`,
-                }))}
-              />
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Clone Permissions From Template</label>
+              <select
+                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500 bg-white text-slate-700"
+                value={newRoleForm.templateCode}
+                onChange={(e) => setNewRoleForm({ ...newRoleForm, templateCode: e.target.value })}
+              >
+                <option value="">No template — start with 0 permissions</option>
+                {allRoles.map((r) => (
+                  <option key={r.code} value={r.code}>
+                    {r.name} — {rolePermissions[r.code]?.length || 0} permissions
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-400 mt-1">You can fine-tune permissions after creating the role.</p>
             </div>
 
             <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
-              <Button
-                type="button"
-                variant="secondary"
-                size="md"
-                onClick={() => setCreateModalOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" variant="primary" size="md">
-                Create & Configure Role
+              <Button variant="secondary" size="sm" type="button" onClick={() => setCreateModalOpen(false)}>Cancel</Button>
+              <Button variant="primary" size="sm" type="submit" leftIcon={<Plus className="w-3.5 h-3.5" />}>
+                Create Role
               </Button>
             </div>
           </form>
         </Modal>
       )}
 
-      {/* MODAL 2: Delete Role Confirmation */}
-      {deleteConfirmOpen && (
+      {/* ── MODAL: Delete Custom Role ─────────────────────────────────── */}
+      {deleteModalRole && (
         <Modal
-          isOpen={deleteConfirmOpen}
-          onClose={() => setDeleteConfirmOpen(false)}
-          title={`Delete Security Role: ${selectedRole?.name}?`}
-          description="Are you sure you want to delete this custom security role?"
+          isOpen={Boolean(deleteModalRole)}
+          onClose={() => setDeleteModalRole(null)}
+          title={`Delete Role: ${deleteModalRole.name}`}
           size="sm"
         >
           <div className="space-y-4">
-            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-              <div className="space-y-1 leading-relaxed">
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+              <div>
                 <p className="font-semibold">This action cannot be undone.</p>
-                <p>
-                  Any users assigned to this role will lose their custom menu permissions and should be reassigned to a standard profile.
+                <p className="mt-0.5 text-rose-700/90">
+                  The custom role <strong>"{deleteModalRole.name}"</strong> and all its permission settings will be permanently removed.
+                  Any users assigned to this role should be reassigned.
                 </p>
               </div>
             </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setDeleteConfirmOpen(false)}
-              >
-                Keep Role
-              </Button>
-              <Button
-                type="button"
-                variant="danger"
-                size="sm"
-                onClick={handleConfirmDelete}
-              >
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <Button variant="secondary" size="sm" onClick={() => setDeleteModalRole(null)}>Cancel</Button>
+              <Button variant="danger" size="sm" onClick={handleDeleteCustomRole} leftIcon={<Trash2 className="w-3.5 h-3.5" />}>
                 Delete Role
               </Button>
             </div>
