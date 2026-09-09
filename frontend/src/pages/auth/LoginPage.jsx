@@ -3,8 +3,8 @@ import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Mail, Lock, LogIn, Sparkles } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
-import Input from '../../components/forms/Input';
-import Button from '../../components/common/Button';
+import Input from '../../components/ui/Input';
+import Button from '../../components/ui/Button';
 
 export function LoginPage() {
   const { login, isLoading } = useAuth();
