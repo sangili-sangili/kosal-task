@@ -27,11 +27,11 @@ export function Table({
   }
 
   return (
-    <div className="w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-subtle">
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse">
+    <div className="w-full rounded-2xl border border-slate-200/90 bg-white shadow-subtle overflow-hidden">
+      <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+        <table className="w-full text-left border-collapse min-w-[760px]">
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50/70">
+            <tr className="border-b border-slate-200/90 bg-gradient-to-r from-slate-50 via-slate-50/80 to-slate-50/60">
               {columns.map((col) => {
                 const isSorted = sortBy === col.key;
                 return (
@@ -39,8 +39,8 @@ export function Table({
                     key={col.key}
                     scope="col"
                     onClick={() => handleSort(col.key, col.sortable)}
-                    className={`px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-500 select-none ${
-                      col.sortable ? 'cursor-pointer hover:bg-slate-100/70 transition-colors' : ''
+                    className={`px-4 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-600 select-none ${
+                      col.sortable ? 'cursor-pointer hover:text-slate-900 hover:bg-slate-100/60 transition-colors' : ''
                     } ${col.headerClassName || ''}`}
                   >
                     <div className="inline-flex items-center gap-1">

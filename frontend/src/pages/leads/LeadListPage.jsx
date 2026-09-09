@@ -16,10 +16,16 @@ import {
   RotateCcw,
   CheckCircle2,
   AlertCircle,
+  Download,
+  FileSpreadsheet,
+  Layers,
+  Sparkles,
+  ChevronRight,
 } from 'lucide-react';
 import { leadService } from '../../services/leadService';
 import { LEAD_STAGES, STAGE_CONFIG } from '../../constants/crmConstants';
 import { formatCRMDate } from '../../utils/crmFormatters';
+import { exportLeadsToExcel } from '../../utils/excelExport';
 import Table from '../../components/ui/Table';
 import Pagination from '../../components/ui/Pagination';
 import Button from '../../components/ui/Button';
@@ -67,8 +73,8 @@ export function LeadListPage() {
   const [newSelectedStage, setNewSelectedStage] = useState('');
   const [isUpdatingStage, setIsUpdatingStage] = useState(false);
 
-  // Action Menu open tracking
-  const [activeMenuId, setActiveMenuId] = useState(null);
+  // Fixed Floating Action Menu State
+  const [activeActionMenu, setActiveActionMenu] = useState(null); // { id, lead, top, left, openUpward }
 
   // Feedback Toast
   const [feedback, setFeedback] = useState(null);
@@ -76,6 +82,15 @@ export function LeadListPage() {
     setFeedback({ msg, type });
     setTimeout(() => setFeedback(null), 3500);
   };
+
+  // Close floating action menu on window scroll
+  useEffect(() => {
+    const handleScroll = () => {
+      if (activeActionMenu) setActiveActionMenu(null);
+    };
+    window.addEventListener('scroll', handleScroll, true);
+    return () => window.removeEventListener('scroll', handleScroll, true);
+  }, [activeActionMenu]);
 
   // Load active sales reps & projects on mount
   useEffect(() => {
@@ -153,6 +168,21 @@ export function LeadListPage() {
     setSortOrder(order);
   };
 
+  // Export to Excel handler
+  const handleExportToExcel = () => {
+    if (!leads || leads.length === 0) {
+      showFeedback('No leads available to export.', 'error');
+      return;
+    }
+    try {
+      exportLeadsToExcel(leads);
+      showFeedback(`Successfully exported ${leads.length} leads to Excel (.csv)!`);
+    } catch (err) {
+      console.error('Export failed:', err);
+      showFeedback('Failed to export leads to Excel.', 'error');
+    }
+  };
+
   const handleConfirmDelete = async () => {
     if (!leadToDelete) return;
     setIsDeleting(true);
@@ -187,7 +217,45 @@ export function LeadListPage() {
 
   const hasActiveFilters = Boolean(searchTerm || stageFilter || employeeFilter || projectFilter);
 
-  // Table Columns
+  // Avatar gradient generator
+  const getAvatarGradient = (name = '') => {
+    const gradients = [
+      'from-indigo-600 to-blue-500',
+      'from-emerald-600 to-teal-500',
+      'from-purple-600 to-indigo-500',
+      'from-rose-600 to-pink-500',
+      'from-amber-600 to-orange-500',
+      'from-cyan-600 to-blue-500',
+    ];
+    const charCode = (name.charCodeAt(0) || 0) + (name.charCodeAt(1) || 0);
+    return gradients[charCode % gradients.length];
+  };
+
+  // Source pill style generator
+  const getSourceStyle = (src = '') => {
+    const s = src.toLowerCase();
+    if (s.includes('website')) return 'bg-sky-50 text-sky-700 border-sky-200/80';
+    if (s.includes('walk-in')) return 'bg-emerald-50 text-emerald-700 border-emerald-200/80';
+    if (s.includes('referral')) return 'bg-purple-50 text-purple-700 border-purple-200/80';
+    if (s.includes('magic') || s.includes('99acres') || s.includes('housing'))
+      return 'bg-amber-50 text-amber-700 border-amber-200/80';
+    if (s.includes('channel')) return 'bg-indigo-50 text-indigo-700 border-indigo-200/80';
+    if (s.includes('social')) return 'bg-pink-50 text-pink-700 border-pink-200/80';
+    return 'bg-slate-100 text-slate-700 border-slate-200/80';
+  };
+
+  // Stage indicator dot colors
+  const stageDotColors = {
+    NEW: 'bg-sky-500',
+    CONTACTED: 'bg-blue-500',
+    SITE_VISIT: 'bg-amber-500',
+    INTERESTED: 'bg-purple-500',
+    NEGOTIATION: 'bg-orange-500',
+    BOOKED: 'bg-emerald-500',
+    LOST: 'bg-rose-500',
+  };
+
+  // Table Columns Definition
   const columns = [
     {
       key: 'name',
@@ -196,13 +264,23 @@ export function LeadListPage() {
       render: (_, row) => (
         <div
           onClick={() => navigate(`/leads/${row.id}`)}
-          className="cursor-pointer group text-left"
+          className="cursor-pointer group flex items-center gap-3 text-left py-0.5"
         >
-          <div className="font-semibold text-slate-900 group-hover:text-brand-700 transition-colors">
-            {row.name}
+          <div
+            className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${getAvatarGradient(
+              row.name
+            )} text-white flex items-center justify-center font-bold text-xs shadow-xs shrink-0 group-hover:scale-105 transition-transform`}
+          >
+            {row.name ? row.name[0].toUpperCase() : 'L'}
           </div>
-          <div className="text-[11px] text-slate-500 truncate max-w-[180px]">
-            {row.email || 'No email provided'}
+          <div className="min-w-0">
+            <div className="font-bold text-slate-900 group-hover:text-brand-600 transition-colors text-xs sm:text-sm truncate">
+              {row.name}
+            </div>
+            <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5 truncate max-w-[210px]">
+              <Mail className="w-3 h-3 text-slate-400 shrink-0" />
+              <span className="truncate">{row.email || 'No email registered'}</span>
+            </div>
           </div>
         </div>
       ),
@@ -210,7 +288,14 @@ export function LeadListPage() {
     {
       key: 'phone',
       title: 'Phone',
-      render: (phone) => <span className="font-mono text-xs text-slate-600">{phone || '—'}</span>,
+      render: (phone) => (
+        <div className="flex items-center">
+          <span className="font-mono text-xs font-semibold text-slate-700 bg-slate-100/90 border border-slate-200/80 px-2 py-1 rounded-lg inline-flex items-center gap-1.5 shadow-2xs">
+            <Phone className="w-3 h-3 text-slate-400" />
+            {phone || '—'}
+          </span>
+        </div>
+      ),
     },
     {
       key: 'stage',
@@ -223,10 +308,17 @@ export function LeadListPage() {
             setStageModalLead(row);
             setNewSelectedStage(stage);
           }}
-          className={`${STAGE_CONFIG[stage]?.badgeClass || 'badge-new'} hover:opacity-85 transition-opacity cursor-pointer text-left shadow-2xs`}
-          title="Click to update stage"
+          className={`${
+            STAGE_CONFIG[stage]?.badgeClass || 'badge-new'
+          } hover:opacity-85 transition-all cursor-pointer text-left shadow-2xs inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold`}
+          title="Click to advance or change stage"
         >
-          {STAGE_CONFIG[stage]?.label || stage}
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${
+              stageDotColors[stage] || 'bg-slate-400'
+            } animate-pulse`}
+          />
+          <span>{STAGE_CONFIG[stage]?.label || stage}</span>
         </button>
       ),
     },
@@ -236,12 +328,16 @@ export function LeadListPage() {
       sortable: false,
       render: (_, row) => {
         const repName = row.assignedSalesEmployee?.name || row.assignedToName || 'Unassigned';
+        const repRole = row.assignedSalesEmployee?.role || 'Sales Rep';
         return (
-          <div className="flex items-center gap-1.5">
-            <span className="w-5 h-5 rounded-full bg-slate-100 text-slate-700 font-bold text-[10px] flex items-center justify-center">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 font-bold text-[10px] flex items-center justify-center border border-slate-200/80 shrink-0">
               {repName[0]}
-            </span>
-            <span className="text-xs font-medium text-slate-700">{repName}</span>
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-slate-800 truncate">{repName}</div>
+              <div className="text-[10px] text-slate-400 uppercase tracking-wider">{repRole}</div>
+            </div>
           </div>
         );
       },
@@ -251,10 +347,18 @@ export function LeadListPage() {
       title: 'Next Follow-up',
       render: (_, row) => {
         const date = row.follow_up_date || row.followupDate;
-        if (!date) return <span className="text-slate-400 text-xs">—</span>;
+        if (!date) return <span className="text-slate-400 text-xs font-medium">—</span>;
+        const isOverdue = new Date(date) < new Date(new Date().setHours(0, 0, 0, 0));
         return (
-          <div className="text-slate-700">
-            <div className="text-xs font-medium">{formatCRMDate(date)}</div>
+          <div
+            className={`inline-flex items-center gap-1.5 text-xs font-medium ${
+              isOverdue
+                ? 'text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200'
+                : 'text-slate-700'
+            }`}
+          >
+            <Calendar className={`w-3.5 h-3.5 ${isOverdue ? 'text-rose-500' : 'text-slate-400'}`} />
+            <span>{formatCRMDate(date)}</span>
           </div>
         );
       },
@@ -263,7 +367,11 @@ export function LeadListPage() {
       key: 'source',
       title: 'Source',
       render: (source) => (
-        <span className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+        <span
+          className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border shadow-2xs inline-block ${getSourceStyle(
+            source
+          )}`}
+        >
           {source || 'Walk-in'}
         </span>
       ),
@@ -277,64 +385,37 @@ export function LeadListPage() {
         <div className="relative inline-block text-left" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
-            onClick={() => setActiveMenuId(activeMenuId === row.id ? null : row.id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (activeActionMenu?.id === row.id) {
+                setActiveActionMenu(null);
+                return;
+              }
+              const rect = e.currentTarget.getBoundingClientRect();
+              const menuHeight = 185;
+              const spaceBelow = window.innerHeight - rect.bottom;
+              const openUpward = spaceBelow < menuHeight;
+
+              setActiveActionMenu({
+                id: row.id,
+                lead: row,
+                top: openUpward ? rect.top - menuHeight - 4 : rect.bottom + 4,
+                left: Math.max(12, rect.right - 180),
+                openUpward,
+              });
+            }}
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
-            aria-label="Row actions"
+            aria-label="Actions"
           >
             <MoreVertical className="w-4 h-4" />
           </button>
-
-          {activeMenuId === row.id && (
-            <>
-              <div
-                className="fixed inset-0 z-20"
-                onClick={() => setActiveMenuId(null)}
-                aria-hidden="true"
-              />
-              <div className="absolute right-0 mt-1 w-44 rounded-xl bg-white p-1.5 shadow-dropdown border border-slate-200 z-30 animate-in fade-in zoom-in-95">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveMenuId(null);
-                    navigate(`/leads/${row.id}`);
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors text-left"
-                >
-                  <Eye className="w-3.5 h-3.5 text-slate-500" />
-                  View Profile
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveMenuId(null);
-                    navigate(`/leads/${row.id}/edit`);
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors text-left"
-                >
-                  <Edit2 className="w-3.5 h-3.5 text-slate-500" />
-                  Edit Details
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveMenuId(null);
-                    setLeadToDelete(row);
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors text-left"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                  Delete Lead
-                </button>
-              </div>
-            </>
-          )}
         </div>
       ),
     },
   ];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {/* Toast Feedback */}
       {feedback && (
         <div
@@ -351,24 +432,44 @@ export function LeadListPage() {
         </div>
       )}
 
-      {/* Page Header */}
+      {/* Page Header with Export Excel & Add Lead */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">Leads</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
+            <span>Leads Directory</span>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200/80">
+              {pagination.total || leads.length} Records
+            </span>
+          </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Real-time management of prospective home buyers, sales stages, and follow-ups
+            Real-time management of prospective home buyers, sales pipeline stages, and follow-ups
           </p>
         </div>
 
-        <Link to="/leads/create">
-          <Button variant="primary" size="md" leftIcon={UserPlus} className="shadow-xs">
-            Add Lead
+        {/* Action Buttons: Export Excel + Add Lead */}
+        <div className="flex items-center gap-2.5">
+          <Button
+            type="button"
+            variant="secondary"
+            size="md"
+            leftIcon={Download}
+            onClick={handleExportToExcel}
+            className="border-emerald-300/80 text-emerald-800 bg-emerald-50/70 hover:bg-emerald-100 hover:border-emerald-400 font-semibold shadow-2xs transition-all"
+            title="Download formatted Excel spreadsheet of leads"
+          >
+            Export Excel
           </Button>
-        </Link>
+
+          <Link to="/leads/create">
+            <Button variant="primary" size="md" leftIcon={UserPlus} className="shadow-xs font-semibold">
+              Add Lead
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Filter Toolbar */}
-      <div className="p-4 rounded-xl bg-white border border-slate-200/90 shadow-subtle space-y-3">
+      <div className="p-4 sm:p-5 rounded-2xl bg-white border border-slate-200/90 shadow-subtle space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {/* Search Input */}
           <Input
@@ -395,7 +496,7 @@ export function LeadListPage() {
             }}
             options={Object.values(LEAD_STAGES).map((st) => ({
               value: st,
-              label: STAGE_CONFIG[st]?.label || st,
+              label: `${STAGE_CONFIG[st]?.label || st} (${st})`,
             }))}
           />
 
@@ -413,7 +514,7 @@ export function LeadListPage() {
             }))}
           />
 
-          {/* Project Filter */}
+          {/* Property Filter */}
           <Select
             placeholder="All Properties"
             value={projectFilter}
@@ -430,16 +531,16 @@ export function LeadListPage() {
 
         {/* Clear Filters Indicator */}
         {hasActiveFilters && (
-          <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs text-slate-500">
+          <div className="flex items-center justify-between pt-2.5 border-t border-slate-100 text-xs text-slate-500">
             <span>
-              Found <strong className="text-slate-900">{pagination.total || leads.length}</strong> matching prospects
+              Showing <strong className="text-slate-900">{pagination.total || leads.length}</strong> matching prospects
             </span>
             <button
               type="button"
               onClick={handleResetFilters}
-              className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900 font-medium transition-colors"
+              className="inline-flex items-center gap-1.5 text-brand-700 hover:text-brand-900 font-semibold transition-colors cursor-pointer"
             >
-              <RotateCcw className="w-3 h-3" />
+              <RotateCcw className="w-3.5 h-3.5" />
               Reset All Filters
             </button>
           </div>
@@ -447,17 +548,17 @@ export function LeadListPage() {
       </div>
 
       {/* Main Leads Table */}
-      <div className="space-y-3">
+      <div className="space-y-4">
         {error ? (
-          <div className="p-8 text-center bg-rose-50/70 rounded-xl border border-rose-200 text-rose-700">
+          <div className="p-8 text-center bg-rose-50/80 rounded-2xl border border-rose-200 text-rose-700 space-y-3">
             <p className="text-sm font-semibold">{error}</p>
             <Button
               variant="secondary"
               size="sm"
               onClick={fetchLeads}
-              className="mt-3"
+              className="mx-auto"
             >
-              Retry
+              Retry Loading
             </Button>
           </div>
         ) : (
@@ -493,6 +594,81 @@ export function LeadListPage() {
           </>
         )}
       </div>
+
+      {/* Fixed Floating Action Menu Portal (Prevents clipping by table container) */}
+      {activeActionMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-transparent"
+            onClick={() => setActiveActionMenu(null)}
+          />
+          <div
+            style={{
+              position: 'fixed',
+              top: `${activeActionMenu.top}px`,
+              left: `${activeActionMenu.left}px`,
+              width: '180px',
+            }}
+            className="z-50 rounded-xl bg-white p-1.5 shadow-2xl border border-slate-200/90 animate-in fade-in zoom-in-95 backdrop-blur-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                const leadId = activeActionMenu.id;
+                setActiveActionMenu(null);
+                navigate(`/leads/${leadId}`);
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors text-left"
+            >
+              <Eye className="w-3.5 h-3.5 text-slate-500" />
+              View Profile
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const leadId = activeActionMenu.id;
+                setActiveActionMenu(null);
+                navigate(`/leads/${leadId}/edit`);
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors text-left"
+            >
+              <Edit2 className="w-3.5 h-3.5 text-slate-500" />
+              Edit Details
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const leadObj = activeActionMenu.lead;
+                setActiveActionMenu(null);
+                setStageModalLead(leadObj);
+                setNewSelectedStage(leadObj.stage);
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors text-left"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+              Change Stage
+            </button>
+
+            <div className="my-1 border-t border-slate-100" />
+
+            <button
+              type="button"
+              onClick={() => {
+                const leadObj = activeActionMenu.lead;
+                setActiveActionMenu(null);
+                setLeadToDelete(leadObj);
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors text-left"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+              Delete Lead
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Delete Lead Confirmation Modal */}
       <Modal
