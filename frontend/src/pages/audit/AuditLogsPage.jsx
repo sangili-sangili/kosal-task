@@ -34,6 +34,7 @@ import Table from '../../components/ui/Table';
 import Modal from '../../components/ui/Modal';
 import Pagination from '../../components/ui/Pagination';
 import { auditService } from '../../services/auditService';
+import { useAuth } from '../../hooks/useAuth';
 import { usePermissions } from '../../hooks/usePermissions';
 
 const PAGE_SIZE = 20;

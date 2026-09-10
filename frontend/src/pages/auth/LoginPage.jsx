@@ -74,6 +74,7 @@ export function LoginPage() {
         <Input
           label="Email Address"
           type="email"
+          autoComplete="email"
           placeholder="admin@crm.com"
           leftIcon={Mail}
           required
@@ -90,6 +91,7 @@ export function LoginPage() {
         <Input
           label="Password"
           type="password"
+          autoComplete="current-password"
           placeholder="••••••••"
           leftIcon={Lock}
           required
