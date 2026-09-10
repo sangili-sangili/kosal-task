@@ -1,103 +1,74 @@
-# REST API Specification (v1)
+# Real Estate CRM – REST API Specification (v1)
 
-Base URL: `/api/v1`
-
-All responses follow the JSend-compliant standard format:
-
-```json
-{
-  "success": true,
-  "message": "Operation status description",
-  "data": { ... },
-  "pagination": {
-    "page": 1,
-    "limit": 20,
-    "total": 100,
-    "totalPages": 5
-  }
-}
-```
+> 📘 **Master Database & API Guide**: For full database table schemas, data dictionary, entity-relationship diagram (ERD), and complete API payload specifications, please refer to the comprehensive [DATABASE_AND_API_OVERVIEW.md](file:///e:/sangili/kosal-Task/docs/DATABASE_AND_API_OVERVIEW.md).
 
 ---
 
-## 1. Authentication Endpoints
+## Quick Endpoint Sitemap
 
-### `POST /api/v1/auth/login`
-- **Access**: Public (Rate-limited: 10 requests / 15m)
-- **Body**:
-  ```json
-  {
-    "email": "admin@enterprise.com",
-    "password": "Admin@123456"
-  }
-  ```
-- **Returns**: User object, Access Token (15m expiration), Refresh Token (7-day expiration).
+* **Base URL:** `/api/v1`
+* **Swagger Interactive Docs:** `http://localhost:5000/api/docs`
+* **Health Probe:** `GET /api/v1/health`
 
-### `POST /api/v1/auth/register`
-- **Access**: Public
-- **Body**: `{ firstName, lastName, email, password, phone }`
+### 1. Authentication (`/api/v1/auth`)
+* `POST /login` – Staff authentication (Returns Access Token + Refresh Token)
+* `POST /register` – Register staff account
+* `POST /refresh-token` – Single-use rotating refresh token
+* `POST /logout` – Revoke session
+* `GET /me` – Current authenticated user profile
 
-### `POST /api/v1/auth/refresh-token`
-- **Access**: Public
-- **Body**: `{ "refreshToken": "<token>" }`
-- **Behavior**: Single-use token rotation. Detects reuse attacks and immediately revokes all user sessions upon breach attempt.
+### 2. Leads Management (`/api/v1/leads`)
+* `GET /` – Paginated leads list with stage & rep filters
+* `POST /` – Create new prospect
+* `GET /:id` – Single lead details & interaction history
+* `PATCH /:id` – Update lead information
+* `PATCH /:id/stage` – Advance pipeline stage (`NEW` ➔ `CONTACTED` ➔ `SITE_VISIT` ➔ `NEGOTIATION` ➔ `BOOKED` ➔ `LOST`)
+* `DELETE /:id` – Soft-delete lead (Admin only)
+* `POST /:id/notes` – Add prospect note
+* `GET /:id/notes` – Retrieve lead notes
+* `POST /:id/followups` – Schedule follow-up appointment
+* `GET /:id/followups` – View scheduled follow-ups
+* `PATCH /:id/followups/:followupId` – Mark follow-up completed
 
-### `POST /api/v1/auth/logout`
-- **Access**: Public
-- **Body**: `{ "refreshToken": "<token>" }`
+### 3. Property Projects & Towers (`/api/v1/projects`)
+* `GET /` – List all real estate projects
+* `POST /` – Create new project
+* `GET /:id` – Single project details & building hierarchy
+* `PATCH /:id` – Update project details
+* `DELETE /:id` – Soft-delete project
+* `GET /:projectId/buildings` – Get towers under specified project
+* `POST /:projectId/buildings` – Add a tower/building to a project
 
-### `GET /api/v1/auth/me`
-- **Access**: Private (Bearer JWT)
+### 4. Unit Inventory (`/api/v1/units`)
+* `GET /` – Paginated inventory with BHK, price, and status filters (`AVAILABLE`, `HOLD`, `BOOKED`, `SOLD`)
+* `POST /` – Add inventory unit
+* `GET /:id` – Single unit specifications
+* `PATCH /:id` – Update unit pricing or details
+* `PATCH /:id/status` – Update inventory status
+* `DELETE /:id` – Soft-delete unit
 
----
+### 5. Bookings Management (`/api/v1/bookings`)
+* `GET /` – List customer bookings
+* `POST /` – Atomic unit reservation & token payment
+* `GET /:id` – Booking receipt voucher & details
+* `PATCH /:id/status` – Update booking status
+* `PATCH /:id/cancel` – Cancel booking and release unit back to `AVAILABLE`
 
-## 2. User Management Endpoints
+### 6. Executive Dashboard (`/api/v1/dashboard`)
+* `GET /metrics` – KPIs, conversion funnel, revenue stats, and role-scoped recent activities
 
-### `GET /api/v1/users`
-- **Access**: Private (`SUPER_ADMIN`, `ADMIN`, `MANAGER`)
-- **Query Parameters**:
-  - `page`: Integer (Default: 1)
-  - `limit`: Integer (Default: 20)
-  - `search`: String (Searches firstName, lastName, email)
-  - `status`: `ACTIVE` | `INACTIVE` | `SUSPENDED`
-  - `sortBy`: `createdAt` | `firstName` | `email`
-  - `sortOrder`: `ASC` | `DESC`
+### 7. User & Roles Master (`/api/v1/users`)
+* `GET /` – Staff user directory
+* `POST /` – Create staff user
+* `GET /:id` – User details
+* `PUT /:id` – Update user profile & role
+* `PATCH /:id/toggle-status` – Activate / Deactivate account
+* `PATCH /:id/reset-password` – Admin password reset
+* `DELETE /:id` – Soft-delete staff account
+* `GET /roles/all` – Roles and permissions matrix
+* `PUT /roles/:code/permissions` – Update role permissions
 
-### `POST /api/v1/users`
-- **Access**: Private (`SUPER_ADMIN`, `ADMIN`)
-- **Body**: `{ firstName, lastName, email, password, phone, roleId, status }`
-
-### `PUT /api/v1/users/:id`
-- **Access**: Private (`SUPER_ADMIN`, `ADMIN`)
-
-### `DELETE /api/v1/users/:id`
-- **Access**: Private (`SUPER_ADMIN`, `ADMIN`)
-- **Behavior**: Paranoid soft delete (`deleted_at` timestamp set, row preserved for audit).
-
----
-
-## 3. Customer & Transaction Showcase Endpoints
-
-### `GET /api/v1/customers`
-- **Access**: Private
-
-### `POST /api/v1/customers/transaction-demo`
-- **Access**: Private
-- **Body**:
-  ```json
-  {
-    "customer": {
-      "firstName": "Jane",
-      "lastName": "Doe",
-      "email": "jane.doe@enterprise.com",
-      "phone": "+1-555-0144",
-      "company": "Global Corp"
-    },
-    "account": {
-      "accountType": "CHECKING",
-      "initialDeposit": 2500.00,
-      "currency": "USD"
-    }
-  }
-  ```
-- **Behavior**: Executes managed Sequelize atomic transaction across Customers, Accounts, and AuditLogs.
+### 8. Audit Trail (`/api/v1/audit`)
+* `GET /` – Paginated audit logs with search, actor, entity, and action filters (Admin only)
+* `GET /stats` – Event analytics & security metrics (Admin only)
+* `GET /:id` – Deep event diff inspection (Admin only)

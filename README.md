@@ -3,6 +3,7 @@
 > A production-ready, enterprise-grade Real Estate CRM & Property Inventory Management Platform built with Clean Architecture, Domain-Driven Modular MVC, React 18, Vite, Tailwind CSS, Redux Toolkit, Node.js, Express, Sequelize ORM, MySQL 8.0, Redis 7.0, and BullMQ.
 
 > 📘 **Complete Flow & Tech Stack Guide**: For in-depth sequence diagrams, business lifecycle workflows, and the complete library breakdown, read [PROJECT_WORKFLOW_AND_TECH_STACK.md](file:///e:/sangili/kosal-Task/docs/PROJECT_WORKFLOW_AND_TECH_STACK.md).
+> 🗄️ **Database & API Specification Guide**: For complete database schemas, data dictionary, entity-relationship diagram (ERD), and REST API endpoints, read [DATABASE_AND_API_OVERVIEW.md](file:///e:/sangili/kosal-Task/docs/DATABASE_AND_API_OVERVIEW.md).
 
 ---
 
